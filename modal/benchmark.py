@@ -1,0 +1,153 @@
+import modal
+
+app = modal.App("benchmark-e2e")
+image = (
+    modal.Image.debian_slim()
+    .apt_install("wget", "gnupg")
+    .run_commands(
+        "wget -qO - https://developer.download.nvidia.com/devtools/repos/ubuntu2204/amd64/nvidia.pub | apt-key add -",
+        'echo "deb https://developer.download.nvidia.com/devtools/repos/ubuntu2204/amd64/ /" > /etc/apt/sources.list.d/nvidia-devtools.list',
+        "apt-get update",
+        "apt-get install -y nsight-systems-cli",
+    )
+    .uv_sync()
+    .add_local_python_source("cs336_systems")
+    .add_local_dir("scripts", remote_path="/scripts")
+)
+
+# Model configurations from Table 1
+MODEL_CONFIGS = {
+    "small": {"d_model": 768, "d_ff": 3072, "num_layers": 12, "num_heads": 12},
+    "medium": {"d_model": 1024, "d_ff": 4096, "num_layers": 24, "num_heads": 16},
+    "large": {"d_model": 1280, "d_ff": 5120, "num_layers": 36, "num_heads": 20},
+    "xl": {"d_model": 1600, "d_ff": 6400, "num_layers": 48, "num_heads": 25},
+    "2.7B": {"d_model": 2560, "d_ff": 10240, "num_layers": 32, "num_heads": 32},
+}
+
+with image.imports():
+    import ast
+
+
+@app.function(
+    image=image,
+    gpu="H100",
+    cpu=32,
+    timeout=10000,
+)
+def benchmark_model(
+    size: str,
+    d_model: int,
+    d_ff: int,
+    num_layers: int,
+    num_heads: int,
+    warmup_steps: int,
+    num_steps: int,
+    batch_size: int,
+) -> dict:
+    import subprocess
+
+    result = subprocess.run(
+        [
+            "python",
+            "/scripts/benchmark.py",
+            f"size={size}",
+            f"d_model={d_model}",
+            f"d_ff={d_ff}",
+            f"num_layers={num_layers}",
+            f"num_heads={num_heads}",
+            f"warmup_steps={warmup_steps}",
+            f"num_steps={num_steps}",
+            f"batch_size={batch_size}",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    # Print subprocess output
+    print(result.stdout)
+    if result.stderr:
+        print(result.stderr)
+
+    # Parse the results dict from the last line
+    output = result.stdout.strip()
+    last_line = output.split("\n")[-1]
+    parsed = ast.literal_eval(last_line)
+
+    return parsed
+
+
+@app.local_entrypoint()
+async def main(warmup_steps: int = 5, num_steps: int = 10, batch_size: int = 4):
+    import asyncio
+
+    print(f"Running benchmarks with warmup_steps={warmup_steps}, num_steps={num_steps}, batch_size={batch_size}")
+    print()
+
+    all_results = await asyncio.gather(
+        *[
+            benchmark_model.remote.aio(
+                size=size,
+                d_model=config["d_model"],
+                d_ff=config["d_ff"],
+                num_layers=config["num_layers"],
+                num_heads=config["num_heads"],
+                warmup_steps=warmup_steps,
+                num_steps=num_steps,
+                batch_size=batch_size,
+            )
+            for size, config in MODEL_CONFIGS.items()
+        ]
+    )
+
+    # Print summary table
+    print("\n" + "=" * 80)
+    print("SUMMARY")
+    print("=" * 80)
+    print(f"{'Size':<10} {'Params':<12} {'Forward (ms)':<22} {'Backward (ms)':<22}")
+    print("-" * 80)
+
+    # Sort by model size order
+    size_order = ["small", "medium", "large", "xl", "2.7B"]
+    sorted_results = sorted(all_results, key=lambda x: size_order.index(x["size"]) if x["size"] in size_order else 999)
+
+    for r in sorted_results:
+        params = f"{r.get('num_params', 0) / 1e9:.2f}B"
+        forward = f"{r.get('forward_mean', 0):.2f} ± {r.get('forward_std', 0):.2f}"
+        backward = f"{r.get('backward_mean', 0):.2f} ± {r.get('backward_std', 0):.2f}"
+        print(f"{r['size']:<10} {params:<12} {forward:<22} {backward:<22}")
+
+
+"""
+================================================================================
+SUMMARY (baseline with no warmup steps)
+================================================================================
+Size       Params          Forward (ms)         Backward (ms)       
+--------------------------------------------------------------------------------
+small      0.13B         332.11 ± 912.81      138.79 ± 189.63
+medium     0.42B         393.73 ± 948.10      274.08 ± 189.79
+large      0.97B         480.69 ± 981.22      473.54 ± 175.91
+xl         2.00B         590.70 ± 957.01      858.04 ± 156.91
+2.7B       3.41B         638.48 ± 891.29      1153.99 ± 142.38
+
+================================================================================
+SUMMARY (baseline with 1 warmup step)
+================================================================================
+Size       Params          Forward (ms)         Backward (ms)       
+--------------------------------------------------------------------------------
+small      0.13B         28.59 ± 7.65      72.88 ± 2.69
+medium     0.42B         67.84 ± 7.60      195.97 ± 5.54
+large      0.97B         144.81 ± 12.43      420.34 ± 10.32
+xl         2.00B         311.57 ± 34.22      815.77 ± 5.45
+2.7B       3.41B         342.14 ± 3.07      1118.18 ± 23.78 
+
+================================================================================
+SUMMARY (baseline with 5 warmup steps)
+================================================================================
+Size       Params          Forward (ms)         Backward (ms)
+--------------------------------------------------------------------------------
+small      0.13B          22.93 ± 1.78         74.21 ± 2.54
+medium     0.42B          74.14 ± 7.76         192.62 ± 4.30
+large      0.97B          158.85 ± 9.93        419.77 ± 7.16
+xl         2.00B          282.74 ± 3.86        823.70 ± 24.34
+2.7B       3.41B          343.50 ± 3.02        1104.09 ± 1.65
+"""

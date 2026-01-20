@@ -1,35 +1,14 @@
-import modal
+import time
 
+import chz
+import numpy as np
+import torch
+
+from cs336_systems.config import ModelConfig
 from cs336_systems.transformer_lm import TransformerLM
-
-app = modal.App("benchmark-e2e")
-image = modal.Image.debian_slim().uv_sync().add_local_python_source("cs336_systems")
-
-# Model configurations from Table 1
-MODEL_CONFIGS = {
-    "small": {"d_model": 768, "d_ff": 3072, "num_layers": 12, "num_heads": 12},
-    "medium": {"d_model": 1024, "d_ff": 4096, "num_layers": 24, "num_heads": 16},
-    "large": {"d_model": 1280, "d_ff": 5120, "num_layers": 36, "num_heads": 20},
-    "xl": {"d_model": 1600, "d_ff": 6400, "num_layers": 48, "num_heads": 25},
-    "2.7B": {"d_model": 2560, "d_ff": 10240, "num_layers": 32, "num_heads": 32},
-}
-
-with image.imports():
-    import time
-
-    import numpy as np
-    import torch
-
-    from cs336_systems.config import ModelConfig
-    from cs336_systems.utils import get_random_batch
+from cs336_systems.utils import get_random_batch
 
 
-@app.function(
-    image=image,
-    gpu="H100",
-    cpu=32,
-    timeout=10000,
-)
 def benchmark_model(
     size: str,
     d_model: int,
@@ -105,65 +84,46 @@ def benchmark_model(
         "size": size,
         "num_params": num_params,
         "batch_size": batch_size,
-        "forward_mean": forward_times_arr.mean(),
-        "forward_std": forward_times_arr.std(),
-        "backward_mean": backward_times_arr.mean(),
-        "backward_std": backward_times_arr.std(),
+        "forward_mean": float(forward_times_arr.mean()),
+        "forward_std": float(forward_times_arr.std()),
+        "backward_mean": float(backward_times_arr.mean()),
+        "backward_std": float(backward_times_arr.std()),
     }
-
-    print(f"\nResults for {size}:")
-    print(f"  Forward:  {results['forward_mean']:.2f} ± {results['forward_std']:.2f} ms")
-    print(f"  Backward: {results['backward_mean']:.2f} ± {results['backward_std']:.2f} ms")
 
     return results
 
 
-@app.local_entrypoint()
-async def main(warmup_steps: int = 1, num_steps: int = 10, batch_size: int = 4):
-    import asyncio
+@chz.chz(typecheck=True)
+class BenchmarkConfig:
+    size: str
+    d_model: int
+    d_ff: int
+    num_layers: int
+    num_heads: int
+    warmup_steps: int = 10
+    num_steps: int = 20
+    batch_size: int = 4
 
-    print(f"Running benchmarks with warmup_steps={warmup_steps}, num_steps={num_steps}, batch_size={batch_size}")
 
-    tasks = [
-        benchmark_model.remote.aio(
-            size=size,
-            d_model=config["d_model"],
-            d_ff=config["d_ff"],
-            num_layers=config["num_layers"],
-            num_heads=config["num_heads"],
-            warmup_steps=warmup_steps,
-            num_steps=num_steps,
-            batch_size=batch_size,
-        )
-        for size, config in MODEL_CONFIGS.items()
-    ]
-    all_results = await asyncio.gather(*tasks)
+def main(config: BenchmarkConfig):
+    results = benchmark_model(
+        size=config.size,
+        d_model=config.d_model,
+        d_ff=config.d_ff,
+        num_layers=config.num_layers,
+        num_heads=config.num_heads,
+        warmup_steps=config.warmup_steps,
+        num_steps=config.num_steps,
+        batch_size=config.batch_size,
+    )
+    print(results)
 
-    print("\n" + "=" * 80)
-    print("SUMMARY")
-    print("=" * 80)
-    print(f"{'Size':<10} {'Params':<15} {'Forward (ms)':<20} {'Backward (ms)':<20}")
-    print("-" * 80)
-    for r in all_results:
-        print(
-            f"{r['size']:<10} {r['num_params'] / 1e9:.2f}B{'':<8} "
-            f"{r['forward_mean']:.2f} ± {r['forward_std']:.2f}{'':<5} "
-            f"{r['backward_mean']:.2f} ± {r['backward_std']:.2f}"
-        )
+
+if __name__ == "__main__":
+    chz.nested_entrypoint(main)
 
 
 """
-================================================================================
-SUMMARY (baseline with 5 warmup steps)
-================================================================================
-Size       Params          Forward (ms)         Backward (ms)
---------------------------------------------------------------------------------
-small      0.13B          22.93 ± 1.78         74.21 ± 2.54
-medium     0.42B          74.14 ± 7.76         192.62 ± 4.30
-large      0.97B          158.85 ± 9.93        419.77 ± 7.16
-xl         2.00B          282.74 ± 3.86        823.70 ± 24.34
-2.7B       3.41B          343.50 ± 3.02        1104.09 ± 1.65
-
 ================================================================================
 SUMMARY (baseline with no warmup steps)
 ================================================================================
@@ -185,4 +145,15 @@ medium     0.42B         67.84 ± 7.60      195.97 ± 5.54
 large      0.97B         144.81 ± 12.43      420.34 ± 10.32
 xl         2.00B         311.57 ± 34.22      815.77 ± 5.45
 2.7B       3.41B         342.14 ± 3.07      1118.18 ± 23.78 
+
+================================================================================
+SUMMARY (baseline with 5 warmup steps)
+================================================================================
+Size       Params          Forward (ms)         Backward (ms)
+--------------------------------------------------------------------------------
+small      0.13B          22.93 ± 1.78         74.21 ± 2.54
+medium     0.42B          74.14 ± 7.76         192.62 ± 4.30
+large      0.97B          158.85 ± 9.93        419.77 ± 7.16
+xl         2.00B          282.74 ± 3.86        823.70 ± 24.34
+2.7B       3.41B          343.50 ± 3.02        1104.09 ± 1.65
 """
