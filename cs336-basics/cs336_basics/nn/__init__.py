@@ -1,11 +1,11 @@
-from cs336_basics.nn.modules.attn import MultiHeadAttention
-from cs336_basics.nn.modules.embedding import Embedding
-from cs336_basics.nn.modules.ffn import FFN, silu
-from cs336_basics.nn.modules.linear import Linear
-from cs336_basics.nn.modules.rmsnorm import RMSNorm
-from cs336_basics.nn.modules.rope import apply_rope
-from cs336_basics.nn.modules.transformer_block import TransformerBlock
-from cs336_basics.nn.modules.utils import RoPEConfig, scaled_dot_product_attention, softmax
+from cs336_basics.nn.attn import MultiHeadAttention
+from cs336_basics.nn.embedding import Embedding
+from cs336_basics.nn.ffn import FFN, silu
+from cs336_basics.nn.linear import Linear
+from cs336_basics.nn.rmsnorm import RMSNorm
+from cs336_basics.nn.rope import apply_rope
+from cs336_basics.nn.transformer_block import TransformerBlock
+from cs336_basics.nn.utils import RoPEConfig, scaled_dot_product_attention, softmax
 
 __all__ = [
     "Linear",
