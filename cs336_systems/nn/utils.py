@@ -1,9 +1,11 @@
 from dataclasses import dataclass
 from math import sqrt
 
+import torch
 from einops import einsum, reduce
 from jaxtyping import Bool, Float, Int
-from torch import Tensor, torch
+from torch import Tensor
+from torch.profiler import record_function
 
 
 @dataclass
@@ -32,10 +34,16 @@ def scaled_dot_product_attention(
     mask: Bool[Tensor, "s s"] | None = None,
 ) -> Float[Tensor, "... s v"]:
     d_k = sqrt(q.shape[-1])
-    q_k = einsum(q, k, "... s_in k, ... s_out k -> ... s_in s_out") / d_k
+
+    with record_function("sdpa/attention_scores"):
+        q_k = einsum(q, k, "... s_in k, ... s_out k -> ... s_in s_out") / d_k
 
     if mask is not None:
-        q_k = q_k.masked_fill(~mask, value=-torch.inf)
+        with record_function("sdpa/mask"):
+            q_k = q_k.masked_fill(~mask, value=-torch.inf)
 
-    q_k = softmax(q_k, dim=-1)
-    return einsum(q_k, v, "... s_in s_out, ... s_out v -> ... s_in v")
+    with record_function("sdpa/softmax"):
+        q_k = softmax(q_k, dim=-1)
+
+    with record_function("sdpa/output_matmul"):
+        return einsum(q_k, v, "... s_in s_out, ... s_out v -> ... s_in v")

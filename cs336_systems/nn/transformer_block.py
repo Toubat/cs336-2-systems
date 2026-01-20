@@ -1,6 +1,7 @@
 import torch
 from jaxtyping import Float
 from torch import Tensor, nn
+from torch.profiler import record_function
 
 from cs336_systems.nn import FFN, MultiHeadAttention, RMSNorm
 from cs336_systems.nn.utils import RoPEConfig
@@ -31,6 +32,12 @@ class TransformerBlock(nn.Module):
         rope_config: RoPEConfig | None = None,
     ) -> Float[Tensor, "bs seq_len d_model"]:
         # Use regular addition instead of inplace to avoid MPS gradient issues
-        x = x + self.attn(self.ln1(x), rope_config=rope_config)
-        x = x + self.ffn(self.ln2(x))
+        with record_function("block/ln1"):
+            normed1 = self.ln1(x)
+        with record_function("block/attention"):
+            x = x + self.attn(normed1, rope_config=rope_config)
+        with record_function("block/ln2"):
+            normed2 = self.ln2(x)
+        with record_function("block/ffn"):
+            x = x + self.ffn(normed2)
         return x

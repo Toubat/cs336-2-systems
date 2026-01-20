@@ -4,12 +4,6 @@ app = modal.App("benchmark-e2e")
 image = (
     modal.Image.debian_slim()
     .apt_install("wget", "gnupg")
-    .run_commands(
-        "wget -qO - https://developer.download.nvidia.com/devtools/repos/ubuntu2204/amd64/nvidia.pub | apt-key add -",
-        'echo "deb https://developer.download.nvidia.com/devtools/repos/ubuntu2204/amd64/ /" > /etc/apt/sources.list.d/nvidia-devtools.list',
-        "apt-get update",
-        "apt-get install -y nsight-systems-cli",
-    )
     .uv_sync()
     .add_local_python_source("cs336_systems")
     .add_local_dir("scripts", remote_path="/scripts")

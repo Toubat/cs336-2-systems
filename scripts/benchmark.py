@@ -21,6 +21,10 @@ def benchmark_model(
 ):
     device = "cuda:0"
     config = ModelConfig()
+    try:
+        nvtx = torch.cuda.nvtx
+    except Exception:
+        nvtx = None
 
     print(f"\n{'=' * 60}")
     print(f"Benchmarking {size} model: d_model={d_model}, d_ff={d_ff}, num_layers={num_layers}, num_heads={num_heads}")
@@ -49,25 +53,35 @@ def benchmark_model(
 
     # Warmup
     print(f"Running {warmup_steps} warm-up steps...")
+    if nvtx is not None:
+        nvtx.range_push("warmup")
     for _ in range(warmup_steps):
         logits = model(x)
         logits.mean().backward()
         model.zero_grad()
+    if nvtx is not None:
+        nvtx.range_pop()
     torch.cuda.synchronize()
 
     # Benchmark forward pass
     print(f"Benchmarking forward pass ({num_steps} steps)...")
     forward_times: list[float] = []
+    if nvtx is not None:
+        nvtx.range_push("forward")
     for _ in range(num_steps):
         torch.cuda.synchronize()
         start = time.perf_counter()
         _ = model(x)
         torch.cuda.synchronize()
         forward_times.append((time.perf_counter() - start) * 1000)  # ms
+    if nvtx is not None:
+        nvtx.range_pop()
 
     # Benchmark backward pass (forward + backward)
     print(f"Benchmarking forward+backward pass ({num_steps} steps)...")
     backward_times: list[float] = []
+    if nvtx is not None:
+        nvtx.range_push("forward+backward")
     for _ in range(num_steps):
         torch.cuda.synchronize()
         start = time.perf_counter()
@@ -76,6 +90,8 @@ def benchmark_model(
         torch.cuda.synchronize()
         backward_times.append((time.perf_counter() - start) * 1000)  # ms
         model.zero_grad()
+    if nvtx is not None:
+        nvtx.range_pop()
 
     forward_times_arr = np.array(forward_times)
     backward_times_arr = np.array(backward_times)

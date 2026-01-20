@@ -2,6 +2,7 @@ import torch
 from einops import einsum, repeat
 from jaxtyping import Float
 from torch import Tensor, nn
+from torch.profiler import record_function
 
 
 class RMSNorm(nn.Module):
@@ -20,15 +21,16 @@ class RMSNorm(nn.Module):
         self.gamma = nn.Parameter(torch.ones(d_model, device=device, dtype=dtype))
 
     def forward(self, x: Float[Tensor, " ... d"]) -> Float[Tensor, " ... d"]:
-        in_type = x.dtype
+        with record_function("rmsnorm"):
+            in_type = x.dtype
 
-        rms = einsum(x, x, "... d, ... d -> ...")
-        rms = repeat(rms, "... -> ... 1")
+            rms = einsum(x, x, "... d, ... d -> ...")
+            rms = repeat(rms, "... -> ... 1")
 
-        rms = rms / self.d_model + self.eps
-        rms = rms.sqrt()
+            rms = rms / self.d_model + self.eps
+            rms = rms.sqrt()
 
-        # upscale to float32 for numerical stability
-        x = x.to(torch.float32)
-        x = einsum(x / rms, self.gamma, "... d, d -> ... d")
-        return x.to(in_type)
+            # upscale to float32 for numerical stability
+            x = x.to(torch.float32)
+            x = einsum(x / rms, self.gamma, "... d, d -> ... d")
+            return x.to(in_type)

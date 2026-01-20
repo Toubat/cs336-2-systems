@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Profile Viewer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        wb: {
+                            bg: '#0d1117',
+                            card: '#161b22',
+                            border: '#30363d',
+                            hover: '#1f2428',
+                            text: '#c9d1d9',
+                            muted: '#8b949e',
+                            accent: '#f59e0b',
+                            accentHover: '#d97706',
+                            green: '#3fb950',
+                            red: '#f85149',
+                            blue: '#58a6ff',
+                            purple: '#a371f7',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        [x-cloak] { display: none !important; }
+        body { background-color: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif; }
+        .drop-zone { border: 2px dashed #30363d; transition: all 0.2s; }
+        .drop-zone.dragover { border-color: #f59e0b; background-color: rgba(245, 158, 11, 0.05); }
+        .table-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+        .table-scroll::-webkit-scrollbar-track { background: #161b22; }
+        .table-scroll::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+        .table-scroll::-webkit-scrollbar-thumb:hover { background: #484f58; }
+        .mono { font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace; }
+        .stat-value { font-variant-numeric: tabular-nums; }
+    </style>
+</head>
+<body class="min-h-screen" x-data="profileViewer()" x-init="init()">
+    <div class="max-w-[1600px] mx-auto px-4 py-4">
+        <!-- Header -->
+        <header class="flex items-center justify-between mb-4 pb-3 border-b border-wb-border">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 bg-wb-accent rounded flex items-center justify-center">
+                    <svg class="w-4 h-4 text-black" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M2 10a8 8 0 018-8v8h8a8 8 0 11-16 0z"/><path d="M12 2.252A8.014 8.014 0 0117.748 8H12V2.252z"/>
+                    </svg>
+                </div>
+                <h1 class="text-lg font-semibold text-white">Profile Viewer</h1>
+            </div>
+            <div class="flex items-center gap-2" x-show="data">
+                <select x-model="selectedIndex" @change="onModelChange()" 
+                        class="bg-wb-card border border-wb-border rounded px-2 py-1 text-sm text-wb-text focus:border-wb-accent focus:outline-none">
+                    <template x-for="(m, i) in data" :key="i">
+                        <option :value="i" x-text="`${m.size || 'Model '+i} · ${formatParams(m.num_params)} · ctx=${m.context_length}`"></option>
+                    </template>
+                </select>
+            </div>
+        </header>
+
+        <!-- Upload Zone -->
+        <div x-show="!data" x-cloak
+             class="drop-zone rounded-lg p-12 text-center cursor-pointer mb-4"
+             :class="{ 'dragover': isDragging }"
+             @click="$refs.fileInput.click()"
+             @dragover.prevent="isDragging = true"
+             @dragleave="isDragging = false"
+             @drop.prevent="isDragging = false; handleDrop($event)">
+            <svg class="w-10 h-10 text-wb-muted mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+            </svg>
+            <p class="text-wb-text mb-1">Drop JSON profile here or click to browse</p>
+            <p class="text-wb-muted text-sm">Supports array or single profile format</p>
+            <input type="file" x-ref="fileInput" @change="handleFile($event)" accept=".json" class="hidden">
+            <button @click.stop="loadDemo()" class="mt-4 bg-wb-accent hover:bg-wb-accentHover text-black text-sm font-medium px-4 py-1.5 rounded transition">
+                Load Demo
+            </button>
+        </div>
+
+        <!-- Main Content -->
+        <div x-show="model" x-cloak>
+            <!-- Model Info Bar -->
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs mb-4 px-1">
+                <template x-for="item in modelMeta" :key="item.label">
+                    <span class="text-wb-muted"><span x-text="item.label"></span>: <span class="text-wb-text" x-text="item.value"></span></span>
+                </template>
+            </div>
+
+            <!-- Stats Row -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                <div class="bg-wb-card border border-wb-border rounded-lg p-3">
+                    <div class="text-xs text-wb-muted mb-1">Forward CUDA</div>
+                    <div class="text-xl font-semibold text-white stat-value" x-text="formatTime(model?.forward?.total_cuda_time_ms)"></div>
+                    <div class="text-xs text-wb-muted mt-0.5"><span x-text="model?.forward?.num_events || 0"></span> events</div>
+                </div>
+                <div class="bg-wb-card border border-wb-border rounded-lg p-3">
+                    <div class="text-xs text-wb-muted mb-1">Fwd+Bwd CUDA</div>
+                    <div class="text-xl font-semibold text-white stat-value" x-text="formatTime(model?.backward?.total_cuda_time_ms)"></div>
+                    <div class="text-xs text-wb-muted mt-0.5"><span x-text="model?.backward?.num_events || 0"></span> events</div>
+                </div>
+                <div class="bg-wb-card border border-wb-border rounded-lg p-3">
+                    <div class="text-xs text-wb-muted mb-1">Bwd Only CUDA</div>
+                    <div class="text-xl font-semibold text-white stat-value" x-text="formatTime(bwdOnlyTime)"></div>
+                    <div class="text-xs text-wb-muted mt-0.5">fwd+bwd − fwd</div>
+                </div>
+                <div class="bg-wb-card border border-wb-border rounded-lg p-3">
+                    <div class="text-xs text-wb-muted mb-1">Bwd/Fwd Ratio</div>
+                    <div class="text-xl font-semibold text-wb-accent stat-value" x-text="bwdFwdRatio"></div>
+                    <div class="text-xs text-wb-muted mt-0.5">bwd only / fwd</div>
+                </div>
+            </div>
+
+            <!-- Charts Row -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-4">
+                <div class="bg-wb-card border border-wb-border rounded-lg p-4">
+                    <div class="text-sm font-medium text-white mb-3">Operation Breakdown (Forward)</div>
+                    <div class="h-64 flex items-center justify-center">
+                        <canvas x-ref="opChart"></canvas>
+                    </div>
+                </div>
+                <div class="bg-wb-card border border-wb-border rounded-lg p-4">
+                    <div class="text-sm font-medium text-white mb-3">Forward vs Fwd+Bwd</div>
+                    <div class="h-64">
+                        <canvas x-ref="compareChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Top Kernels Comparison -->
+            <div class="bg-wb-card border border-wb-border rounded-lg p-4 mb-4">
+                <div class="text-sm font-medium text-white mb-3">Top Kernels: <span class="text-wb-green">Forward</span> vs <span class="text-wb-accent">Fwd+Bwd</span></div>
+                <div style="height: 900px;">
+                    <canvas x-ref="kernelsCompareChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Attention Comparison -->
+            <div class="bg-wb-card border border-wb-border rounded-lg p-4 mb-4">
+                <div class="text-sm font-medium text-white mb-3">Attention Operations: <span class="text-wb-green">Forward</span> vs <span class="text-wb-accent">Fwd+Bwd</span></div>
+                <div class="h-64">
+                    <canvas x-ref="attnCompareChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Table -->
+            <div class="bg-wb-card border border-wb-border rounded-lg overflow-hidden">
+                <div class="flex items-center justify-between p-3 border-b border-wb-border">
+                    <div class="text-sm font-medium text-white">Kernel Events</div>
+                    <div class="flex items-center gap-2">
+                        <select x-model="tablePass" @change="updateTable()" class="bg-wb-bg border border-wb-border rounded px-2 py-1 text-xs text-wb-text">
+                            <option value="forward">Forward Only</option>
+                            <option value="backward">Fwd + Bwd</option>
+                        </select>
+                        <input type="text" x-model="searchQuery" @input="updateTable()" placeholder="Search..." 
+                               class="bg-wb-bg border border-wb-border rounded px-2 py-1 text-xs text-wb-text w-40 focus:border-wb-accent focus:outline-none">
+                    </div>
+                </div>
+                <div class="table-scroll overflow-auto max-h-96">
+                    <table class="w-full text-xs">
+                        <thead class="sticky top-0 bg-wb-card border-b border-wb-border">
+                            <tr class="text-left text-wb-muted">
+                                <th class="px-3 py-2 font-medium cursor-pointer hover:text-wb-text" @click="sortBy('name')">
+                                    Name <span x-show="sortCol === 'name'" x-text="sortDir === 'asc' ? '↑' : '↓'"></span>
+                                </th>
+                                <th class="px-3 py-2 font-medium text-right cursor-pointer hover:text-wb-text" @click="sortBy('cuda_time_ms')">
+                                    CUDA <span x-show="sortCol === 'cuda_time_ms'" x-text="sortDir === 'asc' ? '↑' : '↓'"></span>
+                                </th>
+                                <th class="px-3 py-2 font-medium text-right cursor-pointer hover:text-wb-text" @click="sortBy('cuda_time_pct')">
+                                    % <span x-show="sortCol === 'cuda_time_pct'" x-text="sortDir === 'asc' ? '↑' : '↓'"></span>
+                                </th>
+                                <th class="px-3 py-2 font-medium text-right cursor-pointer hover:text-wb-text" @click="sortBy('count')">
+                                    Count <span x-show="sortCol === 'count'" x-text="sortDir === 'asc' ? '↑' : '↓'"></span>
+                                </th>
+                                <th class="px-3 py-2 font-medium text-right">Avg (μs)</th>
+                                <th class="px-3 py-2 font-medium text-right">CPU</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="(e, idx) in filteredEvents" :key="e.name + e.cuda_time_ms">
+                                <tr class="border-b border-wb-border/50 hover:bg-wb-hover" :class="getRowClass(e.name)">
+                                    <td class="px-3 py-1.5 mono cursor-pointer select-none" 
+                                        :class="expandedRow === idx ? 'whitespace-normal break-all' : 'truncate max-w-md'"
+                                        :title="expandedRow === idx ? '' : 'Click to expand'"
+                                        @click="expandedRow = expandedRow === idx ? null : idx"
+                                        x-text="e.name"></td>
+                                    <td class="px-3 py-1.5 text-right stat-value" x-text="e.cuda_time_ms.toFixed(2) + ' ms'"></td>
+                                    <td class="px-3 py-1.5 text-right stat-value" x-text="e.cuda_time_pct.toFixed(1) + '%'"></td>
+                                    <td class="px-3 py-1.5 text-right stat-value" x-text="e.count.toLocaleString()"></td>
+                                    <td class="px-3 py-1.5 text-right stat-value text-wb-muted" x-text="e.cuda_time_avg_us.toFixed(1)"></td>
+                                    <td class="px-3 py-1.5 text-right stat-value text-wb-muted" x-text="e.cpu_time_ms.toFixed(2) + ' ms'"></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Export -->
+            <div class="mt-4 flex items-center gap-2">
+                <button @click="copyExport()" class="bg-wb-card border border-wb-border hover:border-wb-accent text-wb-text text-xs px-3 py-1.5 rounded transition">
+                    <span x-text="copied ? '✓ Copied' : 'Copy Summary'"></span>
+                </button>
+                <button @click="showExport = !showExport" class="text-wb-muted hover:text-wb-text text-xs">
+                    <span x-text="showExport ? 'Hide' : 'Show'"></span> export
+                </button>
+            </div>
+            <pre x-show="showExport" x-text="exportText" class="mt-2 bg-wb-card border border-wb-border rounded p-3 text-xs mono text-wb-muted overflow-x-auto"></pre>
+        </div>
+    </div>
+
+    <script>
+        function profileViewer() {
+            return {
+                data: null,
+                selectedIndex: 0,
+                model: null,
+                isDragging: false,
+                tablePass: 'forward',
+                searchQuery: '',
+                sortCol: 'cuda_time_ms',
+                sortDir: 'desc',
+                filteredEvents: [],
+                copied: false,
+                showExport: false,
+                expandedRow: null,
+                charts: {},
+
+                categoryPatterns: {
+                    'MatMul': [/cutlass/i, /gemm/i, /bmm/i, /einsum/i, /matmul/i],
+                    'Attention': [/sdpa\//i, /attn\//i, /attention/i],
+                    'Norm': [/rmsnorm/i, /layernorm/i, /norm/i],
+                    'FFN': [/ffn\//i, /block\/ffn/i],
+                    'Linear': [/linear/i, /proj/i],
+                    'Softmax': [/softmax/i],
+                    'Memory': [/copy/i, /memcpy/i, /clone/i],
+                    'Elem': [/elementwise/i, /add/i, /mul/i, /div/i, /sub/i],
+                    'RoPE': [/rope/i],
+                },
+
+                categoryColors: {
+                    'MatMul': '#f59e0b', 'Attention': '#a371f7', 'Norm': '#f85149', 'FFN': '#3fb950',
+                    'Linear': '#58a6ff', 'Softmax': '#79c0ff', 'Memory': '#8b949e', 'Elem': '#d2a8ff',
+                    'RoPE': '#ffa657', 'Other': '#484f58',
+                },
+
+                init() {
+                    Chart.defaults.color = '#8b949e';
+                    Chart.defaults.borderColor = '#30363d';
+                },
+
+                get modelMeta() {
+                    if (!this.model) return [];
+                    return [
+                        { label: 'Layers', value: this.model.num_layers },
+                        { label: 'Heads', value: this.model.num_heads },
+                        { label: 'd_model', value: this.model.d_model },
+                        { label: 'd_ff', value: this.model.d_ff },
+                        { label: 'Batch', value: this.model.batch_size },
+                        { label: 'Steps', value: this.model.num_steps },
+                    ].filter(x => x.value != null);
+                },
+
+                get bwdOnlyTime() {
+                    const fwd = this.model?.forward?.total_cuda_time_ms;
+                    const fwdBwd = this.model?.backward?.total_cuda_time_ms;
+                    return (fwd && fwdBwd) ? fwdBwd - fwd : null;
+                },
+
+                get bwdFwdRatio() {
+                    const fwd = this.model?.forward?.total_cuda_time_ms;
+                    const bwdOnly = this.bwdOnlyTime;
+                    return (fwd && bwdOnly) ? (bwdOnly / fwd).toFixed(2) + 'x' : '--';
+                },
+
+                get exportText() {
+                    if (!this.model) return '';
+                    const m = this.model, fwd = m.forward, fwdBwd = m.backward;
+                    const cats = this.categorize(fwd?.top_events || []);
+                    let t = `Profile Summary\n${'='.repeat(50)}\n`;
+                    t += `Model: ${m.size || 'unknown'} | Params: ${this.formatParams(m.num_params)} | Context: ${m.context_length}\n`;
+                    t += `Layers: ${m.num_layers} | Heads: ${m.num_heads} | Batch: ${m.batch_size}\n\n`;
+                    t += `Forward Only CUDA: ${this.formatTime(fwd?.total_cuda_time_ms)}\n`;
+                    t += `Fwd+Bwd CUDA: ${this.formatTime(fwdBwd?.total_cuda_time_ms)}\n`;
+                    t += `Bwd Only CUDA: ${this.formatTime(this.bwdOnlyTime)}\n`;
+                    t += `Bwd/Fwd Ratio: ${this.bwdFwdRatio}\n\n`;
+                    t += `Forward Breakdown:\n`;
+                    Object.entries(cats).sort((a,b) => b[1]-a[1]).forEach(([k,v]) => {
+                        t += `  ${k}: ${v.toFixed(2)}ms (${(v/fwd.total_cuda_time_ms*100).toFixed(1)}%)\n`;
+                    });
+                    return t;
+                },
+
+                handleFile(e) {
+                    const file = e.target.files[0];
+                    if (file) this.loadFile(file);
+                },
+
+                handleDrop(e) {
+                    const file = e.dataTransfer.files[0];
+                    if (file) this.loadFile(file);
+                },
+
+                loadFile(file) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        try {
+                            let d = JSON.parse(e.target.result);
+                            this.data = Array.isArray(d) ? d : [d];
+                            this.selectedIndex = 0;
+                            this.onModelChange();
+                        } catch (err) { alert('Error: ' + err.message); }
+                    };
+                    reader.readAsText(file);
+                },
+
+                loadDemo() {
+                    this.data = [DEMO_DATA];
+                    this.selectedIndex = 0;
+                    this.onModelChange();
+                },
+
+                onModelChange() {
+                    this.model = this.data[this.selectedIndex];
+                    this.$nextTick(() => {
+                        this.updateTable();
+                        this.renderCharts();
+                    });
+                },
+
+                updateTable() {
+                    const events = this.model?.[this.tablePass]?.top_events || [];
+                    // Aggregate events with the same name
+                    const aggregated = new Map();
+                    events.forEach(e => {
+                        if (aggregated.has(e.name)) {
+                            const existing = aggregated.get(e.name);
+                            existing.cuda_time_ms += e.cuda_time_ms;
+                            existing.cuda_time_pct += e.cuda_time_pct;
+                            existing.cpu_time_ms += e.cpu_time_ms;
+                            existing.count += e.count;
+                            existing.cuda_time_avg_us = (existing.cuda_time_ms * 1000) / existing.count;
+                        } else {
+                            aggregated.set(e.name, { ...e });
+                        }
+                    });
+                    let filtered = [...aggregated.values()].filter(e => e.name.toLowerCase().includes(this.searchQuery.toLowerCase()));
+                    filtered.sort((a, b) => {
+                        let av = a[this.sortCol], bv = b[this.sortCol];
+                        if (typeof av === 'string') { av = av.toLowerCase(); bv = bv.toLowerCase(); }
+                        return this.sortDir === 'asc' ? (av < bv ? -1 : 1) : (av > bv ? -1 : 1);
+                    });
+                    this.filteredEvents = filtered;
+                    this.expandedRow = null; // Reset expanded row when table changes
+                },
+
+                sortBy(col) {
+                    if (this.sortCol === col) {
+                        this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+                    } else {
+                        this.sortCol = col;
+                        this.sortDir = 'desc';
+                    }
+                    this.updateTable();
+                },
+
+                categorize(events) {
+                    const cats = {};
+                    Object.keys(this.categoryPatterns).forEach(k => cats[k] = 0);
+                    cats['Other'] = 0;
+                    events.forEach(e => {
+                        let found = false;
+                        for (const [cat, pats] of Object.entries(this.categoryPatterns)) {
+                            if (pats.some(p => p.test(e.name))) { cats[cat] += e.cuda_time_ms; found = true; break; }
+                        }
+                        if (!found) cats['Other'] += e.cuda_time_ms;
+                    });
+                    return Object.fromEntries(Object.entries(cats).filter(([,v]) => v > 0));
+                },
+
+                categorizeAttention(events) {
+                    const ops = { 'Attn Scores': 0, 'Softmax': 0, 'Output MatMul': 0, 'Mask': 0, 'RoPE': 0, 'Other': 0 };
+                    events.forEach(e => {
+                        const n = e.name.toLowerCase();
+                        if (n.includes('attention_scores')) ops['Attn Scores'] += e.cuda_time_ms;
+                        else if (n.includes('softmax')) ops['Softmax'] += e.cuda_time_ms;
+                        else if (n.includes('output_matmul')) ops['Output MatMul'] += e.cuda_time_ms;
+                        else if (n.includes('mask')) ops['Mask'] += e.cuda_time_ms;
+                        else if (n.includes('rope')) ops['RoPE'] += e.cuda_time_ms;
+                        else if (n.includes('sdpa') || n.includes('attn')) ops['Other'] += e.cuda_time_ms;
+                    });
+                    return Object.fromEntries(Object.entries(ops).filter(([,v]) => v > 0));
+                },
+
+                renderCharts() {
+                    this.renderOpChart();
+                    this.renderCompareChart();
+                    this.renderKernelsCompareChart();
+                    this.renderAttnCompareChart();
+                },
+
+                renderOpChart() {
+                    const ctx = this.$refs.opChart?.getContext('2d');
+                    if (!ctx) return;
+                    const cats = this.categorize(this.model?.forward?.top_events || []);
+                    if (this.charts.op) this.charts.op.destroy();
+                    this.charts.op = new Chart(ctx, {
+                        type: 'doughnut',
+                        data: {
+                            labels: Object.keys(cats),
+                            datasets: [{ data: Object.values(cats), backgroundColor: Object.keys(cats).map(k => this.categoryColors[k] || this.categoryColors.Other), borderWidth: 0 }]
+                        },
+                        options: {
+                            responsive: true, maintainAspectRatio: false,
+                            plugins: {
+                                legend: { position: 'right', labels: { boxWidth: 12, padding: 8, font: { size: 11 } } },
+                                tooltip: { callbacks: { label: ctx => `${ctx.label}: ${ctx.raw.toFixed(1)}ms` } }
+                            }
+                        }
+                    });
+                },
+
+                renderCompareChart() {
+                    const ctx = this.$refs.compareChart?.getContext('2d');
+                    if (!ctx) return;
+                    const fwdCats = this.categorize(this.model?.forward?.top_events || []);
+                    const bwdCats = this.categorize(this.model?.backward?.top_events || []);
+                    const labels = [...new Set([...Object.keys(fwdCats), ...Object.keys(bwdCats)])];
+                    if (this.charts.compare) this.charts.compare.destroy();
+                    this.charts.compare = new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels,
+                            datasets: [
+                                { label: 'Forward', data: labels.map(l => fwdCats[l] || 0), backgroundColor: '#3fb950' },
+                                { label: 'Fwd+Bwd', data: labels.map(l => bwdCats[l] || 0), backgroundColor: '#f59e0b' },
+                            ]
+                        },
+                        options: {
+                            responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+                            plugins: { legend: { labels: { boxWidth: 12, font: { size: 11 } } } },
+                            scales: {
+                                x: { grid: { color: '#21262d' }, ticks: { font: { size: 10 } }, title: { display: true, text: 'ms', font: { size: 10 } } },
+                                y: { grid: { display: false }, ticks: { font: { size: 10 } } }
+                            }
+                        }
+                    });
+                },
+
+                renderKernelsCompareChart() {
+                    const ctx = this.$refs.kernelsCompareChart?.getContext('2d');
+                    if (!ctx) return;
+                    
+                    // Get top kernels from both passes and merge by name
+                    const fwdEvents = this.model?.forward?.top_events || [];
+                    const bwdEvents = this.model?.backward?.top_events || [];
+                    
+                    // Create a map of all kernel names with their times
+                    const kernelMap = new Map();
+                    fwdEvents.forEach(e => kernelMap.set(e.name, { fwd: e.cuda_time_ms, bwd: 0 }));
+                    bwdEvents.forEach(e => {
+                        if (kernelMap.has(e.name)) {
+                            kernelMap.get(e.name).bwd = e.cuda_time_ms;
+                        } else {
+                            kernelMap.set(e.name, { fwd: 0, bwd: e.cuda_time_ms });
+                        }
+                    });
+                    
+                    // Sort by max of fwd or bwd time and take top 15
+                    const sorted = [...kernelMap.entries()]
+                        .sort((a, b) => Math.max(b[1].fwd, b[1].bwd) - Math.max(a[1].fwd, a[1].bwd))
+                        .slice(0, 30);
+                    
+                    const labels = sorted.map(([name]) => this.truncate(name, 28));
+                    const fullNames = sorted.map(([name]) => name);
+                    const fwdData = sorted.map(([, v]) => v.fwd);
+                    const bwdData = sorted.map(([, v]) => v.bwd);
+                    
+                    if (this.charts.kernelsCompare) this.charts.kernelsCompare.destroy();
+                    this.charts.kernelsCompare = new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels,
+                            datasets: [
+                                { label: 'Forward', data: fwdData, backgroundColor: '#3fb950' },
+                                { label: 'Fwd+Bwd', data: bwdData, backgroundColor: '#f59e0b' },
+                            ]
+                        },
+                        options: {
+                            responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+                            plugins: {
+                                legend: { labels: { boxWidth: 12, font: { size: 11 } } },
+                                tooltip: { 
+                                    callbacks: { 
+                                        title: ctx => fullNames[ctx[0].dataIndex],
+                                        label: ctx => `${ctx.dataset.label}: ${ctx.raw.toFixed(2)}ms`
+                                    } 
+                                }
+                            },
+                            scales: {
+                                x: { grid: { color: '#21262d' }, ticks: { font: { size: 10 } }, title: { display: true, text: 'ms', font: { size: 10 } } },
+                                y: { grid: { display: false }, ticks: { font: { size: 9 } } }
+                            }
+                        }
+                    });
+                },
+
+                renderAttnCompareChart() {
+                    const ctx = this.$refs.attnCompareChart?.getContext('2d');
+                    if (!ctx) return;
+                    
+                    const fwdOps = this.categorizeAttention(this.model?.forward?.top_events || []);
+                    const bwdOps = this.categorizeAttention(this.model?.backward?.top_events || []);
+                    const labels = [...new Set([...Object.keys(fwdOps), ...Object.keys(bwdOps)])];
+                    
+                    if (this.charts.attnCompare) this.charts.attnCompare.destroy();
+                    this.charts.attnCompare = new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels,
+                            datasets: [
+                                { label: 'Forward', data: labels.map(l => fwdOps[l] || 0), backgroundColor: '#3fb950' },
+                                { label: 'Fwd+Bwd', data: labels.map(l => bwdOps[l] || 0), backgroundColor: '#f59e0b' },
+                            ]
+                        },
+                        options: {
+                            responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+                            plugins: {
+                                legend: { labels: { boxWidth: 12, font: { size: 11 } } },
+                                tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.raw.toFixed(2)}ms` } }
+                            },
+                            scales: {
+                                x: { grid: { color: '#21262d' }, ticks: { font: { size: 10 } }, title: { display: true, text: 'ms', font: { size: 10 } } },
+                                y: { grid: { display: false }, ticks: { font: { size: 10 } } }
+                            }
+                        }
+                    });
+                },
+
+                getKernelColor(name) {
+                    for (const [cat, pats] of Object.entries(this.categoryPatterns)) {
+                        if (pats.some(p => p.test(name))) return this.categoryColors[cat];
+                    }
+                    return this.categoryColors.Other;
+                },
+
+                getRowClass(name) {
+                    if (/cutlass|gemm|bmm|einsum|matmul/i.test(name)) return 'bg-amber-500/5';
+                    if (/sdpa|attn|attention/i.test(name)) return 'bg-purple-500/5';
+                    return '';
+                },
+
+                copyExport() {
+                    navigator.clipboard.writeText(this.exportText);
+                    this.copied = true;
+                    setTimeout(() => this.copied = false, 2000);
+                },
+
+                formatTime(ms) {
+                    if (ms == null) return '--';
+                    return ms >= 1000 ? (ms / 1000).toFixed(2) + ' s' : ms.toFixed(2) + ' ms';
+                },
+
+                formatParams(n) {
+                    if (n == null) return '--';
+                    if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+                    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+                    return n.toLocaleString();
+                },
+
+                truncate(s, len) { return s.length > len ? s.slice(0, len - 2) + '…' : s; }
+            };
+        }
+
+        const DEMO_DATA = {
+            size: "small", num_params: 128625408, batch_size: 4, context_length: 128,
+            d_model: 768, d_ff: 3072, num_layers: 12, num_heads: 12, num_steps: 10,
+            forward: {
+                total_cuda_time_us: 695396.40, total_cuda_time_ms: 695.40,
+                total_cpu_time_us: 548365.79, total_cpu_time_ms: 548.37, num_events: 108,
+                top_events: [
+                    {name: "block/attention", cuda_time_us: 160194.38, cuda_time_ms: 160.19, cuda_time_pct: 23.04, cpu_time_us: 0, cpu_time_ms: 0, count: 120, cuda_time_avg_us: 1334.95},
+                    {name: "attn/rope", cuda_time_us: 91138.78, cuda_time_ms: 91.14, cuda_time_pct: 13.11, cpu_time_us: 0, cpu_time_ms: 0, count: 120, cuda_time_avg_us: 759.49},
+                    {name: "rmsnorm", cuda_time_us: 53686.61, cuda_time_ms: 53.69, cuda_time_pct: 7.72, cpu_time_us: 0, cpu_time_ms: 0, count: 250, cuda_time_avg_us: 214.75},
+                    {name: "aten::einsum", cuda_time_us: 29527.96, cuda_time_ms: 29.53, cuda_time_pct: 4.25, cpu_time_us: 35749.53, cpu_time_ms: 35.75, count: 1350, cuda_time_avg_us: 21.87},
+                    {name: "aten::bmm", cuda_time_us: 25509.33, cuda_time_ms: 25.51, cuda_time_pct: 3.67, cpu_time_us: 35444.49, cpu_time_ms: 35.44, count: 1100, cuda_time_avg_us: 23.19},
+                    {name: "linear", cuda_time_us: 22258.38, cuda_time_ms: 22.26, cuda_time_pct: 3.20, cpu_time_us: 0, cpu_time_ms: 0, count: 610, cuda_time_avg_us: 36.49},
+                    {name: "sdpa/attention_scores", cuda_time_us: 20627.03, cuda_time_ms: 20.63, cuda_time_pct: 2.97, cpu_time_us: 0, cpu_time_ms: 0, count: 120, cuda_time_avg_us: 171.89},
+                    {name: "block/ffn", cuda_time_us: 18143.35, cuda_time_ms: 18.14, cuda_time_pct: 2.61, cpu_time_us: 7865.52, cpu_time_ms: 7.87, count: 120, cuda_time_avg_us: 151.19},
+                    {name: "sdpa/softmax", cuda_time_us: 18024.06, cuda_time_ms: 18.02, cuda_time_pct: 2.59, cpu_time_us: 0, cpu_time_ms: 0, count: 120, cuda_time_avg_us: 150.20},
+                    {name: "void cutlass::Kernel2<cutlass_80_tensorop_s1688gemm>", cuda_time_us: 13449.63, cuda_time_ms: 13.45, cuda_time_pct: 1.93, cpu_time_us: 0, cpu_time_ms: 0, count: 360, cuda_time_avg_us: 37.36},
+                    {name: "attn/sdpa", cuda_time_us: 12121.43, cuda_time_ms: 12.12, cuda_time_pct: 1.74, cpu_time_us: 11460.10, cpu_time_ms: 11.46, count: 120, cuda_time_avg_us: 101.01},
+                    {name: "sdpa/mask", cuda_time_us: 10574.07, cuda_time_ms: 10.57, cuda_time_pct: 1.52, cpu_time_us: 0, cpu_time_ms: 0, count: 120, cuda_time_avg_us: 88.12},
+                    {name: "aten::mul", cuda_time_us: 8444.57, cuda_time_ms: 8.44, cuda_time_pct: 1.21, cpu_time_us: 13796.06, cpu_time_ms: 13.80, count: 1450, cuda_time_avg_us: 5.82},
+                    {name: "aten::copy_", cuda_time_us: 6619.64, cuda_time_ms: 6.62, cuda_time_pct: 0.95, cpu_time_us: 11049.05, cpu_time_ms: 11.05, count: 1320, cuda_time_avg_us: 5.01},
+                    {name: "sdpa/output_matmul", cuda_time_us: 6126.61, cuda_time_ms: 6.13, cuda_time_pct: 0.88, cpu_time_us: 0, cpu_time_ms: 0, count: 120, cuda_time_avg_us: 51.06},
+                    {name: "ffn/silu", cuda_time_us: 5717.72, cuda_time_ms: 5.72, cuda_time_pct: 0.82, cpu_time_us: 0, cpu_time_ms: 0, count: 120, cuda_time_avg_us: 47.65},
+                    {name: "ffn/down_proj", cuda_time_us: 5370.90, cuda_time_ms: 5.37, cuda_time_pct: 0.77, cpu_time_us: 2962.05, cpu_time_ms: 2.96, count: 120, cuda_time_avg_us: 44.76},
+                    {name: "ffn/gate_proj", cuda_time_us: 4562.58, cuda_time_ms: 4.56, cuda_time_pct: 0.66, cpu_time_us: 2463.48, cpu_time_ms: 2.46, count: 120, cuda_time_avg_us: 38.02},
+                    {name: "ffn/up_proj", cuda_time_us: 4486.76, cuda_time_ms: 4.49, cuda_time_pct: 0.65, cpu_time_us: 2899.90, cpu_time_ms: 2.90, count: 120, cuda_time_avg_us: 37.39},
+                    {name: "attn/qkv_proj", cuda_time_us: 4400.28, cuda_time_ms: 4.40, cuda_time_pct: 0.63, cpu_time_us: 6382.70, cpu_time_ms: 6.38, count: 120, cuda_time_avg_us: 36.67}
+                ]
+            },
+            backward: {
+                total_cuda_time_us: 1309771.89, total_cuda_time_ms: 1309.77,
+                total_cpu_time_us: 2424087.34, total_cpu_time_ms: 2424.09, num_events: 211,
+                top_events: [
+                    {name: "block/attention", cuda_time_us: 155327.79, cuda_time_ms: 155.33, cuda_time_pct: 11.86, cpu_time_us: 0, cpu_time_ms: 0, count: 120, cuda_time_avg_us: 1294.40},
+                    {name: "attn/rope", cuda_time_us: 89934.28, cuda_time_ms: 89.93, cuda_time_pct: 6.87, cpu_time_us: 0, cpu_time_ms: 0, count: 120, cuda_time_avg_us: 749.45},
+                    {name: "aten::bmm", cuda_time_us: 86996.34, cuda_time_ms: 87.00, cuda_time_pct: 6.64, cpu_time_us: 152556.83, cpu_time_ms: 152.56, count: 3300, cuda_time_avg_us: 26.36},
+                    {name: "BmmBackward0", cuda_time_us: 61449.30, cuda_time_ms: 61.45, cuda_time_pct: 4.69, cpu_time_us: 31477.39, cpu_time_ms: 31.48, count: 1100, cuda_time_avg_us: 55.86},
+                    {name: "rmsnorm", cuda_time_us: 58524.02, cuda_time_ms: 58.52, cuda_time_pct: 4.47, cpu_time_us: 0, cpu_time_ms: 0, count: 250, cuda_time_avg_us: 234.10},
+                    {name: "aten::copy_", cuda_time_us: 40611.46, cuda_time_ms: 40.61, cuda_time_pct: 3.10, cpu_time_us: 48127.27, cpu_time_ms: 48.13, count: 4100, cuda_time_avg_us: 9.91},
+                    {name: "aten::einsum", cuda_time_us: 29571.20, cuda_time_ms: 29.57, cuda_time_pct: 2.26, cpu_time_us: 29069.85, cpu_time_ms: 29.07, count: 1350, cuda_time_avg_us: 21.90},
+                    {name: "aten::mul", cuda_time_us: 25997.22, cuda_time_ms: 26.00, cuda_time_pct: 1.98, cpu_time_us: 94302.44, cpu_time_ms: 94.30, count: 4260, cuda_time_avg_us: 6.10},
+                    {name: "linear", cuda_time_us: 22293.96, cuda_time_ms: 22.29, cuda_time_pct: 1.70, cpu_time_us: 0, cpu_time_ms: 0, count: 610, cuda_time_avg_us: 36.55},
+                    {name: "AccumulateGrad", cuda_time_us: 21067.69, cuda_time_ms: 21.07, cuda_time_pct: 1.61, cpu_time_us: 19222.32, cpu_time_ms: 19.22, count: 870, cuda_time_avg_us: 24.22},
+                    {name: "MulBackward0", cuda_time_us: 20025.99, cuda_time_ms: 20.03, cuda_time_pct: 1.53, cpu_time_us: 42641.30, cpu_time_ms: 42.64, count: 1450, cuda_time_avg_us: 13.81},
+                    {name: "sdpa/softmax", cuda_time_us: 18709.16, cuda_time_ms: 18.71, cuda_time_pct: 1.43, cpu_time_us: 0, cpu_time_ms: 0, count: 120, cuda_time_avg_us: 155.91},
+                    {name: "block/ffn", cuda_time_us: 18179.98, cuda_time_ms: 18.18, cuda_time_pct: 1.39, cpu_time_us: 6921.12, cpu_time_ms: 6.92, count: 120, cuda_time_avg_us: 151.50},
+                    {name: "sdpa/attention_scores", cuda_time_us: 18142.54, cuda_time_ms: 18.14, cuda_time_pct: 1.39, cpu_time_us: 0, cpu_time_ms: 0, count: 120, cuda_time_avg_us: 151.19},
+                    {name: "DivBackward0", cuda_time_us: 16061.78, cuda_time_ms: 16.06, cuda_time_pct: 1.23, cpu_time_us: 22292.57, cpu_time_ms: 22.29, count: 740, cuda_time_avg_us: 21.71}
+                ]
+            }
+        };
+    </script>
+</body>
+</html>
