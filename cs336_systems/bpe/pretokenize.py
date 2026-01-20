@@ -9,7 +9,7 @@ import regex as re
 from loguru import logger
 from tqdm import tqdm
 
-from cs336_basics.bpe.utils import PAT, find_chunk_boundaries
+from cs336_systems.bpe.utils import PAT, find_chunk_boundaries
 
 
 def cpu_count() -> int:

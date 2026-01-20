@@ -4,11 +4,11 @@ import os
 
 from loguru import logger
 
-from cs336_basics.bpe.pretokenize import pretokenize_file
-from cs336_basics.bpe.utils import BytePair, TokenRef, split_bytes
+from cs336_systems.bpe.pretokenize import pretokenize_file
+from cs336_systems.bpe.utils import BytePair, TokenRef, split_bytes
 
 # Disable library logs by default; can be enabled per-call with verbose=True
-logger.disable("cs336_basics")
+logger.disable("cs336_systems")
 
 
 def get_highest_bp(bp_to_counts: dict[BytePair, int]):
@@ -55,7 +55,7 @@ def run_train_bpe(
 
     verbose: bool = bool(kwargs.get("verbose", False))
     if verbose:
-        logger.enable("cs336_basics")
+        logger.enable("cs336_systems")
 
     logger.debug(
         "Begin BPE training: target_vocab_size={}, special_tokens_count={}",
@@ -152,5 +152,5 @@ def run_train_bpe(
 
     logger.debug("BPE training complete: final_vocab_size={}, merges={}", len(vocab), len(merges))
     if verbose:
-        logger.disable("cs336_basics")
+        logger.disable("cs336_systems")
     return vocab, merges

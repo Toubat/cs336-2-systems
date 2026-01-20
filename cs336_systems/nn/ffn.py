@@ -12,7 +12,7 @@ class FFN(nn.Module):
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
     ):
-        from cs336_basics.nn import Linear
+        from cs336_systems.nn import Linear
 
         super().__init__()
 

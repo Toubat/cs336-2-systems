@@ -20,9 +20,31 @@ def get_batch(
         indices[row, :] = np.arange(starts[row], starts[row] + M + 1)
 
     # Convert uint16 to int64 (torch.long) since PyTorch doesn't support uint16
-    batch = torch.from_numpy(dataset[indices].astype(np.int64)).to(device)
+    batch = torch.from_numpy(dataset[indices].astype(np.int64))
 
-    return batch[:, :-1], batch[:, 1:]
+    x, y = batch[:, :-1], batch[:, 1:]
+
+    if "cuda" in device:
+        x = x.pin_memory().to(device, non_blocking=True)
+        y = y.pin_memory().to(device, non_blocking=True)
+    else:
+        x = x.to(device)
+        y = y.to(device)
+
+    return x, y
+
+
+def get_random_batch(vocab_size: int, batch_size: int, context_length: int, device: str):
+    """
+    Get a random batch of data (no dataset is required, just shape)
+    """
+    x = torch.randint(0, vocab_size, (batch_size, context_length))
+
+    if "cuda" in device:
+        x = x.pin_memory().to(device, non_blocking=True)
+    else:
+        x = x.to(device)
+    return x
 
 
 def save_checkpoint(

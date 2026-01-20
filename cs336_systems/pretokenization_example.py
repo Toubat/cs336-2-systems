@@ -1,4 +1,4 @@
-from cs336_basics.bpe.utils import find_chunk_boundaries
+from cs336_systems.bpe.utils import find_chunk_boundaries
 
 with open("data/TinyStoriesV2-GPT4-valid.txt", "rb") as f:
     num_processes = 400

@@ -4,7 +4,7 @@ from typing import Literal
 
 import chz
 
-from cs336_basics.utils import get_latest_checkpoint_path
+from cs336_systems.utils import get_latest_checkpoint_path
 
 Dataset = Literal["tinystories", "owt"]
 

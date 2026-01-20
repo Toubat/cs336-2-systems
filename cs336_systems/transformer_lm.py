@@ -2,8 +2,8 @@ import torch
 from jaxtyping import Float, Int
 from torch import Tensor, nn
 
-from cs336_basics.bpe.tokenizer import Tokenizer
-from cs336_basics.nn import Embedding, Linear, RMSNorm, RoPEConfig, TransformerBlock, softmax
+from cs336_systems.bpe.tokenizer import Tokenizer
+from cs336_systems.nn import Embedding, Linear, RMSNorm, RoPEConfig, TransformerBlock, softmax
 
 
 class TransformerLM(nn.Module):

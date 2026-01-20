@@ -11,18 +11,18 @@ from dotenv import find_dotenv, load_dotenv
 from loguru import logger
 from tqdm import tqdm
 
-from cs336_basics.bpe.tokenizer import Tokenizer
-from cs336_basics.config import (
+from cs336_systems.bpe.tokenizer import Tokenizer
+from cs336_systems.config import (
     DATASET_TRAIN_PATHS,
     DATASET_VALID_PATHS,
     TOKENIZER_MERGES_PATHS,
     TOKENIZER_VOCAB_PATHS,
     TrainingConfig,
 )
-from cs336_basics.loss import CrossEntropyLoss
-from cs336_basics.optim import AdamW, CosineAnnealingLRScheduler, gradient_clipping
-from cs336_basics.transformer_lm import TransformerLM
-from cs336_basics.utils import get_batch, load_checkpoint, save_checkpoint
+from cs336_systems.loss import CrossEntropyLoss
+from cs336_systems.optim import AdamW, CosineAnnealingLRScheduler, gradient_clipping
+from cs336_systems.transformer_lm import TransformerLM
+from cs336_systems.utils import get_batch, load_checkpoint, save_checkpoint
 
 load_dotenv(find_dotenv())
 
