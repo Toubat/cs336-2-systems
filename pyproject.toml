@@ -54,6 +54,15 @@ log_cli = true
 log_cli_level = "WARNING"
 addopts = "-s"
 
+[tool.pyright]
+extraPaths = ["./cs336-basics"]
+venvPath = "."
+venv = ".venv"
+
+[tool.mypy]
+mypy_path = "./cs336-basics"
+ignore_missing_imports = true
+
 [tool.ruff]
 line-length = 120
 

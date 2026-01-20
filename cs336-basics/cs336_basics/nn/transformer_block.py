@@ -3,7 +3,7 @@ from jaxtyping import Float
 from torch import Tensor, nn
 
 from cs336_basics.nn import FFN, MultiHeadAttention, RMSNorm
-from cs336_basics.nn.modules.utils import RoPEConfig
+from cs336_basics.nn.utils import RoPEConfig
 
 
 class TransformerBlock(nn.Module):

@@ -3,9 +3,9 @@ from einops import rearrange
 from jaxtyping import Float
 from torch import Tensor, nn
 
-from cs336_basics.nn.modules.linear import Linear
-from cs336_basics.nn.modules.rope import apply_rope
-from cs336_basics.nn.modules.utils import RoPEConfig, scaled_dot_product_attention
+from cs336_basics.nn.linear import Linear
+from cs336_basics.nn.rope import apply_rope
+from cs336_basics.nn.utils import RoPEConfig, scaled_dot_product_attention
 
 
 class MultiHeadAttention(nn.Module):
