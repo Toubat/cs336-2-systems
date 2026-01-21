@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Memory Profiler Viewer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        wb: {
+                            bg: '#0d1117',
+                            card: '#161b22',
+                            border: '#30363d',
+                            hover: '#1f2428',
+                            text: '#c9d1d9',
+                            muted: '#8b949e',
+                            accent: '#f59e0b',
+                            accentHover: '#d97706',
+                            green: '#3fb950',
+                            red: '#f85149',
+                            blue: '#58a6ff',
+                            purple: '#a371f7',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        [x-cloak] { display: none !important; }
+        body { background-color: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif; }
+        .drop-zone { border: 2px dashed #30363d; transition: all 0.2s; }
+        .drop-zone.dragover { border-color: #f59e0b; background-color: rgba(245, 158, 11, 0.05); }
+        .table-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+        .table-scroll::-webkit-scrollbar-track { background: #161b22; }
+        .table-scroll::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+        .table-scroll::-webkit-scrollbar-thumb:hover { background: #484f58; }
+        .mono { font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace; }
+        .stat-value { font-variant-numeric: tabular-nums; }
+    </style>
+</head>
+<body class="min-h-screen" x-data="memoryViewer()" x-init="init()">
+    <div class="max-w-[1400px] mx-auto px-4 py-4">
+        <!-- Header -->
+        <header class="flex items-center justify-between mb-4 pb-3 border-b border-wb-border">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 bg-wb-purple rounded flex items-center justify-center">
+                    <svg class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zM3 10a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1v-6zM14 9a1 1 0 00-1 1v6a1 1 0 001 1h2a1 1 0 001-1v-6a1 1 0 00-1-1h-2z"/>
+                    </svg>
+                </div>
+                <h1 class="text-lg font-semibold text-white">Memory Profiler Viewer</h1>
+                <span class="text-xs text-wb-muted">2.7B Model</span>
+            </div>
+            <div class="flex items-center gap-2">
+                <a href="https://pytorch.org/memory_viz" target="_blank" 
+                   class="text-xs text-wb-blue hover:underline">
+                    Open PyTorch Memory Viz (for .pickle files)
+                </a>
+            </div>
+        </header>
+
+        <!-- Upload Zone -->
+        <div x-show="!data" x-cloak
+             class="drop-zone rounded-lg p-12 text-center cursor-pointer mb-4"
+             :class="{ 'dragover': isDragging }"
+             @click="$refs.fileInput.click()"
+             @dragover.prevent="isDragging = true"
+             @dragleave="isDragging = false"
+             @drop.prevent="isDragging = false; handleDrop($event)">
+            <svg class="w-10 h-10 text-wb-muted mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+            </svg>
+            <p class="text-wb-text mb-1">Drop memory summary JSON here or click to browse</p>
+            <p class="text-wb-muted text-sm">Load JSON summaries from benchmark_memory.py</p>
+            <input type="file" x-ref="fileInput" @change="handleFile($event)" accept=".json" class="hidden">
+            <button @click.stop="loadDemo()" class="mt-4 bg-wb-accent hover:bg-wb-accentHover text-black text-sm font-medium px-4 py-1.5 rounded transition">
+                Load Demo
+            </button>
+        </div>
+
+        <!-- Main Content -->
+        <div x-show="data" x-cloak>
+            <!-- Summary Stats -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                <div class="bg-wb-card border border-wb-border rounded-lg p-3">
+                    <div class="text-xs text-wb-muted mb-1">Total Runs</div>
+                    <div class="text-2xl font-semibold text-white stat-value" x-text="data?.length || 0"></div>
+                </div>
+                <div class="bg-wb-card border border-wb-border rounded-lg p-3">
+                    <div class="text-xs text-wb-muted mb-1">Context Lengths</div>
+                    <div class="text-2xl font-semibold text-wb-accent stat-value" x-text="uniqueContextLengths.join(', ')"></div>
+                </div>
+                <div class="bg-wb-card border border-wb-border rounded-lg p-3">
+                    <div class="text-xs text-wb-muted mb-1">Max Peak Memory</div>
+                    <div class="text-2xl font-semibold text-wb-green stat-value" x-text="formatMB(maxPeakMemory)"></div>
+                </div>
+                <div class="bg-wb-card border border-wb-border rounded-lg p-3">
+                    <div class="text-xs text-wb-muted mb-1">Precisions</div>
+                    <div class="text-2xl font-semibold text-wb-blue stat-value" x-text="uniquePrecisions.join(', ')"></div>
+                </div>
+            </div>
+
+            <!-- Memory by Context Length Chart -->
+            <div class="bg-wb-card border border-wb-border rounded-lg p-4 mb-4">
+                <div class="text-sm font-medium text-white mb-3">
+                    Peak Memory by Context Length
+                    <span class="text-wb-muted text-xs ml-2">(Forward vs Train)</span>
+                </div>
+                <div class="h-80">
+                    <canvas x-ref="contextChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Precision Comparison Chart (if both FP32 and BF16) -->
+            <div x-show="hasPrecisionComparison" class="bg-wb-card border border-wb-border rounded-lg p-4 mb-4">
+                <div class="text-sm font-medium text-white mb-3">
+                    Precision Comparison: <span class="text-wb-green">FP32</span> vs <span class="text-wb-accent">BF16</span>
+                    <span class="text-wb-muted text-xs ml-2">(Peak Memory in MB)</span>
+                </div>
+                <div class="h-80">
+                    <canvas x-ref="precisionChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Data Table -->
+            <div class="bg-wb-card border border-wb-border rounded-lg overflow-hidden">
+                <div class="flex items-center justify-between p-3 border-b border-wb-border">
+                    <div class="text-sm font-medium text-white">Memory Profile Results</div>
+                    <div class="flex items-center gap-2">
+                        <select x-model="filterMode" @change="updateTable()" class="bg-wb-bg border border-wb-border rounded px-2 py-1 text-xs text-wb-text">
+                            <option value="all">All Modes</option>
+                            <option value="forward">Forward Only</option>
+                            <option value="train">Train Only</option>
+                        </select>
+                        <select x-model="filterPrecision" @change="updateTable()" class="bg-wb-bg border border-wb-border rounded px-2 py-1 text-xs text-wb-text">
+                            <option value="all">All Precisions</option>
+                            <option value="FP32">FP32</option>
+                            <option value="BF16">BF16</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="table-scroll overflow-auto max-h-96">
+                    <table class="w-full text-xs">
+                        <thead class="sticky top-0 bg-wb-card border-b border-wb-border">
+                            <tr class="text-left text-wb-muted">
+                                <th class="px-3 py-2 font-medium cursor-pointer hover:text-wb-text" @click="sortBy('context_length')">
+                                    Context <span x-show="sortCol === 'context_length'" x-text="sortDir === 'asc' ? '↑' : '↓'"></span>
+                                </th>
+                                <th class="px-3 py-2 font-medium cursor-pointer hover:text-wb-text" @click="sortBy('mode')">
+                                    Mode <span x-show="sortCol === 'mode'" x-text="sortDir === 'asc' ? '↑' : '↓'"></span>
+                                </th>
+                                <th class="px-3 py-2 font-medium cursor-pointer hover:text-wb-text" @click="sortBy('precision')">
+                                    Precision <span x-show="sortCol === 'precision'" x-text="sortDir === 'asc' ? '↑' : '↓'"></span>
+                                </th>
+                                <th class="px-3 py-2 font-medium text-right cursor-pointer hover:text-wb-text" @click="sortBy('peak_memory_mb')">
+                                    Peak (MB) <span x-show="sortCol === 'peak_memory_mb'" x-text="sortDir === 'asc' ? '↑' : '↓'"></span>
+                                </th>
+                                <th class="px-3 py-2 font-medium text-right cursor-pointer hover:text-wb-text" @click="sortBy('allocated_memory_mb')">
+                                    Allocated (MB) <span x-show="sortCol === 'allocated_memory_mb'" x-text="sortDir === 'asc' ? '↑' : '↓'"></span>
+                                </th>
+                                <th class="px-3 py-2 font-medium text-right cursor-pointer hover:text-wb-text" @click="sortBy('reserved_memory_mb')">
+                                    Reserved (MB) <span x-show="sortCol === 'reserved_memory_mb'" x-text="sortDir === 'asc' ? '↑' : '↓'"></span>
+                                </th>
+                                <th class="px-3 py-2 font-medium">Pickle File</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="(r, idx) in filteredData" :key="idx">
+                                <tr class="border-b border-wb-border/50 hover:bg-wb-hover"
+                                    :class="r.error ? 'bg-red-500/10' : ''">
+                                    <td class="px-3 py-2 mono" x-text="r.context_length"></td>
+                                    <td class="px-3 py-2">
+                                        <span class="px-1.5 py-0.5 rounded text-xs"
+                                              :class="r.mode === 'forward' ? 'bg-wb-green/20 text-wb-green' : 'bg-wb-accent/20 text-wb-accent'"
+                                              x-text="r.mode"></span>
+                                    </td>
+                                    <td class="px-3 py-2">
+                                        <span class="px-1.5 py-0.5 rounded text-xs"
+                                              :class="r.precision === 'FP32' ? 'bg-wb-blue/20 text-wb-blue' : 'bg-wb-purple/20 text-wb-purple'"
+                                              x-text="r.precision"></span>
+                                    </td>
+                                    <td class="px-3 py-2 text-right stat-value" x-text="r.error ? '--' : formatMB(r.peak_memory_mb)"></td>
+                                    <td class="px-3 py-2 text-right stat-value text-wb-muted" x-text="r.error ? '--' : formatMB(r.allocated_memory_mb)"></td>
+                                    <td class="px-3 py-2 text-right stat-value text-wb-muted" x-text="r.error ? '--' : formatMB(r.reserved_memory_mb)"></td>
+                                    <td class="px-3 py-2 mono text-xs text-wb-muted truncate max-w-xs" x-text="r.pickle_file || r.error || '--'"></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Instructions -->
+            <div class="mt-4 p-4 bg-wb-card border border-wb-border rounded-lg">
+                <h3 class="text-sm font-medium text-white mb-2">How to visualize memory timeline:</h3>
+                <ol class="text-xs text-wb-muted space-y-1 list-decimal list-inside">
+                    <li>Download the <code class="bg-wb-bg px-1 rounded">.pickle</code> files from the output directory</li>
+                    <li>Go to <a href="https://pytorch.org/memory_viz" target="_blank" class="text-wb-blue hover:underline">pytorch.org/memory_viz</a></li>
+                    <li>Upload the pickle file to see the "Active Memory Timeline"</li>
+                    <li>Use the "Detail" slider to show/hide small allocations</li>
+                </ol>
+            </div>
+
+            <!-- Export -->
+            <div class="mt-4 flex items-center gap-2">
+                <button @click="copyTable()" class="bg-wb-card border border-wb-border hover:border-wb-accent text-wb-text text-xs px-3 py-1.5 rounded transition">
+                    <span x-text="copied ? '✓ Copied' : 'Copy as Markdown'"></span>
+                </button>
+                <button @click="data = null" class="text-wb-muted hover:text-wb-text text-xs">
+                    Load different file
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function memoryViewer() {
+            return {
+                data: null,
+                filteredData: [],
+                isDragging: false,
+                filterMode: 'all',
+                filterPrecision: 'all',
+                sortCol: 'context_length',
+                sortDir: 'asc',
+                copied: false,
+                charts: {},
+
+                init() {
+                    Chart.defaults.color = '#8b949e';
+                    Chart.defaults.borderColor = '#30363d';
+                },
+
+                get uniqueContextLengths() {
+                    if (!this.data) return [];
+                    return [...new Set(this.data.map(d => d.context_length))].sort((a, b) => a - b);
+                },
+
+                get uniquePrecisions() {
+                    if (!this.data) return [];
+                    return [...new Set(this.data.map(d => d.precision))].sort();
+                },
+
+                get maxPeakMemory() {
+                    if (!this.data) return 0;
+                    return Math.max(...this.data.filter(d => !d.error).map(d => d.peak_memory_mb || 0));
+                },
+
+                get hasPrecisionComparison() {
+                    return this.uniquePrecisions.includes('FP32') && this.uniquePrecisions.includes('BF16');
+                },
+
+                handleFile(e) {
+                    const file = e.target.files[0];
+                    if (file) this.loadFile(file);
+                },
+
+                handleDrop(e) {
+                    const file = e.dataTransfer.files[0];
+                    if (file) this.loadFile(file);
+                },
+
+                loadFile(file) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        try {
+                            let d = JSON.parse(e.target.result);
+                            this.data = Array.isArray(d) ? d : [d];
+                            this.updateTable();
+                            this.$nextTick(() => this.renderCharts());
+                        } catch (err) {
+                            alert('Error parsing JSON: ' + err.message);
+                        }
+                    };
+                    reader.readAsText(file);
+                },
+
+                loadDemo() {
+                    this.data = DEMO_DATA;
+                    this.updateTable();
+                    this.$nextTick(() => this.renderCharts());
+                },
+
+                updateTable() {
+                    let filtered = this.data || [];
+                    if (this.filterMode !== 'all') {
+                        filtered = filtered.filter(d => d.mode === this.filterMode);
+                    }
+                    if (this.filterPrecision !== 'all') {
+                        filtered = filtered.filter(d => d.precision === this.filterPrecision);
+                    }
+                    filtered.sort((a, b) => {
+                        let av = a[this.sortCol], bv = b[this.sortCol];
+                        if (typeof av === 'string') { av = av.toLowerCase(); bv = bv.toLowerCase(); }
+                        return this.sortDir === 'asc' ? (av < bv ? -1 : 1) : (av > bv ? -1 : 1);
+                    });
+                    this.filteredData = filtered;
+                },
+
+                sortBy(col) {
+                    if (this.sortCol === col) {
+                        this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+                    } else {
+                        this.sortCol = col;
+                        this.sortDir = 'asc';
+                    }
+                    this.updateTable();
+                },
+
+                renderCharts() {
+                    this.renderContextChart();
+                    if (this.hasPrecisionComparison) {
+                        this.renderPrecisionChart();
+                    }
+                },
+
+                renderContextChart() {
+                    const ctx = this.$refs.contextChart?.getContext('2d');
+                    if (!ctx) return;
+
+                    const contexts = this.uniqueContextLengths;
+                    const forwardData = contexts.map(c => {
+                        const r = this.data.find(d => d.context_length === c && d.mode === 'forward' && !d.error);
+                        return r?.peak_memory_mb || 0;
+                    });
+                    const trainData = contexts.map(c => {
+                        const r = this.data.find(d => d.context_length === c && d.mode === 'train' && !d.error);
+                        return r?.peak_memory_mb || 0;
+                    });
+
+                    if (this.charts.context) this.charts.context.destroy();
+                    this.charts.context = new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels: contexts.map(c => `ctx=${c}`),
+                            datasets: [
+                                { label: 'Forward', data: forwardData, backgroundColor: '#3fb950' },
+                                { label: 'Train', data: trainData, backgroundColor: '#f59e0b' },
+                            ]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: { labels: { boxWidth: 12, font: { size: 11 } } },
+                                tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.raw.toFixed(2)} MB` } }
+                            },
+                            scales: {
+                                x: { grid: { display: false }, ticks: { font: { size: 11 } } },
+                                y: { 
+                                    grid: { color: '#21262d' }, 
+                                    ticks: { font: { size: 10 } },
+                                    title: { display: true, text: 'Peak Memory (MB)', font: { size: 10 } }
+                                }
+                            }
+                        }
+                    });
+                },
+
+                renderPrecisionChart() {
+                    const ctx = this.$refs.precisionChart?.getContext('2d');
+                    if (!ctx) return;
+
+                    const contexts = this.uniqueContextLengths;
+                    const modes = ['forward', 'train'];
+                    const labels = [];
+                    const fp32Data = [];
+                    const bf16Data = [];
+
+                    for (const c of contexts) {
+                        for (const m of modes) {
+                            labels.push(`${c} ${m}`);
+                            const fp32 = this.data.find(d => d.context_length === c && d.mode === m && d.precision === 'FP32' && !d.error);
+                            const bf16 = this.data.find(d => d.context_length === c && d.mode === m && d.precision === 'BF16' && !d.error);
+                            fp32Data.push(fp32?.peak_memory_mb || 0);
+                            bf16Data.push(bf16?.peak_memory_mb || 0);
+                        }
+                    }
+
+                    if (this.charts.precision) this.charts.precision.destroy();
+                    this.charts.precision = new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels,
+                            datasets: [
+                                { label: 'FP32', data: fp32Data, backgroundColor: '#3fb950' },
+                                { label: 'BF16', data: bf16Data, backgroundColor: '#f59e0b' },
+                            ]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: { labels: { boxWidth: 12, font: { size: 11 } } },
+                                tooltip: {
+                                    callbacks: {
+                                        label: ctx => `${ctx.dataset.label}: ${ctx.raw.toFixed(2)} MB`,
+                                        afterBody: (items) => {
+                                            const idx = items[0].dataIndex;
+                                            const fp32 = fp32Data[idx];
+                                            const bf16 = bf16Data[idx];
+                                            if (fp32 && bf16) {
+                                                const savings = ((fp32 - bf16) / fp32 * 100).toFixed(1);
+                                                return `\nBF16 saves ${savings}%`;
+                                            }
+                                            return '';
+                                        }
+                                    }
+                                }
+                            },
+                            scales: {
+                                x: { grid: { display: false }, ticks: { font: { size: 10 } } },
+                                y: { 
+                                    grid: { color: '#21262d' }, 
+                                    ticks: { font: { size: 10 } },
+                                    title: { display: true, text: 'Peak Memory (MB)', font: { size: 10 } }
+                                }
+                            }
+                        }
+                    });
+                },
+
+                formatMB(mb) {
+                    if (mb == null) return '--';
+                    if (mb >= 1024) return (mb / 1024).toFixed(2) + ' GB';
+                    return mb.toFixed(2) + ' MB';
+                },
+
+                copyTable() {
+                    let md = '| Context | Mode | Precision | Peak (MB) | Allocated (MB) | Reserved (MB) |\n';
+                    md += '|---------|------|-----------|-----------|----------------|---------------|\n';
+                    for (const r of this.filteredData) {
+                        md += `| ${r.context_length} | ${r.mode} | ${r.precision} | ${r.error ? 'OOM' : r.peak_memory_mb?.toFixed(2)} | ${r.error ? '--' : r.allocated_memory_mb?.toFixed(2)} | ${r.error ? '--' : r.reserved_memory_mb?.toFixed(2)} |\n`;
+                    }
+                    navigator.clipboard.writeText(md);
+                    this.copied = true;
+                    setTimeout(() => this.copied = false, 2000);
+                }
+            };
+        }
+
+        // Actual benchmark results (2.7B model on H100)
+        const DEMO_DATA = [
+            { context_length: 128, mode: "forward", precision: "FP32", peak_memory_mb: 13213.68, allocated_memory_mb: 13112.68, reserved_memory_mb: 13230.0, pickle_file: "memory_forward_128_fp32.pickle" },
+            { context_length: 128, mode: "forward", precision: "BF16", peak_memory_mb: 19589.99, allocated_memory_mb: 13102.66, reserved_memory_mb: 19696.0, pickle_file: "memory_forward_128_bf16.pickle" },
+            { context_length: 128, mode: "train", precision: "FP32", peak_memory_mb: 52724.08, allocated_memory_mb: 52222.08, reserved_memory_mb: 54612.0, pickle_file: "memory_train_128_fp32.pickle" },
+            { context_length: 128, mode: "train", precision: "BF16", peak_memory_mb: 59159.86, allocated_memory_mb: 52207.53, reserved_memory_mb: 62302.0, pickle_file: "memory_train_128_bf16.pickle" },
+            { context_length: 256, mode: "forward", precision: "FP32", peak_memory_mb: 13332.72, allocated_memory_mb: 13132.72, reserved_memory_mb: 13448.0, pickle_file: "memory_forward_256_fp32.pickle" },
+            { context_length: 256, mode: "forward", precision: "BF16", peak_memory_mb: 19633.68, allocated_memory_mb: 13112.68, reserved_memory_mb: 19982.0, pickle_file: "memory_forward_256_bf16.pickle" },
+            { context_length: 256, mode: "train", precision: "FP32", peak_memory_mb: 52713.66, allocated_memory_mb: 52212.66, reserved_memory_mb: 56460.0, pickle_file: "memory_train_256_fp32.pickle" },
+            { context_length: 256, mode: "train", precision: "BF16", peak_memory_mb: 59164.76, allocated_memory_mb: 52211.43, reserved_memory_mb: 65224.0, pickle_file: "memory_train_256_bf16.pickle" },
+            { context_length: 512, mode: "forward", precision: "FP32", peak_memory_mb: 13570.93, allocated_memory_mb: 13170.93, reserved_memory_mb: 13770.0, pickle_file: "memory_forward_512_fp32.pickle" },
+            { context_length: 512, mode: "forward", precision: "BF16", peak_memory_mb: 19788.98, allocated_memory_mb: 13132.73, reserved_memory_mb: 20714.0, pickle_file: "memory_forward_512_bf16.pickle" },
+            { context_length: 512, mode: "train", precision: "FP32", peak_memory_mb: 62877.34, allocated_memory_mb: 52191.12, reserved_memory_mb: 65842.0, pickle_file: "memory_train_512_fp32.pickle" },
+            { context_length: 512, mode: "train", precision: "BF16", peak_memory_mb: 63493.76, allocated_memory_mb: 52190.26, reserved_memory_mb: 71386.0, pickle_file: "memory_train_512_bf16.pickle" },
+        ];
+    </script>
+</body>
+</html>
