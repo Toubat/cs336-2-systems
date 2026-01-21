@@ -61,7 +61,7 @@
                 <select x-model="selectedIndex" @change="onModelChange()" 
                         class="bg-wb-card border border-wb-border rounded px-2 py-1 text-sm text-wb-text focus:border-wb-accent focus:outline-none">
                     <template x-for="(m, i) in data" :key="i">
-                        <option :value="i" x-text="`${m.size || 'Model '+i} · ${formatParams(m.num_params)} · ctx=${m.context_length}`"></option>
+                        <option :value="i" x-text="`${m.size || 'Model '+i} · ${formatParams(m.num_params)} · ctx=${m.context_length} · ${m.precision || (m.use_amp ? 'BF16' : 'FP32')}`"></option>
                     </template>
                 </select>
             </div>
@@ -96,26 +96,47 @@
             </div>
 
             <!-- Stats Row -->
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-4">
                 <div class="bg-wb-card border border-wb-border rounded-lg p-3">
-                    <div class="text-xs text-wb-muted mb-1">Forward CUDA <span class="text-wb-accent">(per step)</span></div>
+                    <div class="text-xs text-wb-muted mb-1">Forward <span class="text-wb-green">(per step)</span></div>
                     <div class="text-xl font-semibold text-white stat-value" x-text="formatTime(fwdPerStep)"></div>
                     <div class="text-xs text-wb-muted mt-0.5"><span x-text="model?.forward?.num_events || 0"></span> events</div>
                 </div>
                 <div class="bg-wb-card border border-wb-border rounded-lg p-3">
-                    <div class="text-xs text-wb-muted mb-1">Fwd+Bwd CUDA <span class="text-wb-accent">(per step)</span></div>
+                    <div class="text-xs text-wb-muted mb-1">Fwd+Bwd <span class="text-wb-accent">(per step)</span></div>
                     <div class="text-xl font-semibold text-white stat-value" x-text="formatTime(fwdBwdPerStep)"></div>
                     <div class="text-xs text-wb-muted mt-0.5"><span x-text="model?.backward?.num_events || 0"></span> events</div>
                 </div>
                 <div class="bg-wb-card border border-wb-border rounded-lg p-3">
-                    <div class="text-xs text-wb-muted mb-1">Bwd Only CUDA <span class="text-wb-accent">(per step)</span></div>
+                    <div class="text-xs text-wb-muted mb-1">Train Step <span class="text-wb-blue">(per step)</span></div>
+                    <div class="text-xl font-semibold text-white stat-value" x-text="formatTime(trainPerStep)"></div>
+                    <div class="text-xs text-wb-muted mt-0.5"><span x-text="model?.train?.num_events || 0"></span> events</div>
+                </div>
+                <div class="bg-wb-card border border-wb-border rounded-lg p-3">
+                    <div class="text-xs text-wb-muted mb-1">Bwd Only <span class="text-wb-accent">(per step)</span></div>
                     <div class="text-xl font-semibold text-white stat-value" x-text="formatTime(bwdOnlyPerStep)"></div>
                     <div class="text-xs text-wb-muted mt-0.5">fwd+bwd − fwd</div>
+                </div>
+                <div class="bg-wb-card border border-wb-border rounded-lg p-3">
+                    <div class="text-xs text-wb-muted mb-1">Optim Only <span class="text-wb-blue">(per step)</span></div>
+                    <div class="text-xl font-semibold text-white stat-value" x-text="formatTime(optimOnlyPerStep)"></div>
+                    <div class="text-xs text-wb-muted mt-0.5">train − fwd+bwd</div>
                 </div>
                 <div class="bg-wb-card border border-wb-border rounded-lg p-3">
                     <div class="text-xs text-wb-muted mb-1">Bwd/Fwd Ratio</div>
                     <div class="text-xl font-semibold text-wb-accent stat-value" x-text="bwdFwdRatio"></div>
                     <div class="text-xs text-wb-muted mt-0.5">bwd only / fwd</div>
+                </div>
+            </div>
+
+            <!-- Precision Comparison (only shown when both FP32 and BF16 data exists) -->
+            <div x-show="hasPrecisionComparison" class="bg-wb-card border border-wb-border rounded-lg p-4 mb-4">
+                <div class="text-sm font-medium text-white mb-3">
+                    Precision Comparison: <span class="text-wb-green">FP32</span> vs <span class="text-wb-accent">BF16</span>
+                    <span class="text-wb-muted text-xs ml-2">(per step, ms)</span>
+                </div>
+                <div class="h-80">
+                    <canvas x-ref="precisionChart"></canvas>
                 </div>
             </div>
 
@@ -137,7 +158,7 @@
 
             <!-- Top Kernels Comparison -->
             <div class="bg-wb-card border border-wb-border rounded-lg p-4 mb-4">
-                <div class="text-sm font-medium text-white mb-3">Top Kernels: <span class="text-wb-green">Forward</span> vs <span class="text-wb-accent">Fwd+Bwd</span></div>
+                <div class="text-sm font-medium text-white mb-3">Top Kernels: <span class="text-wb-green">Forward</span> vs <span class="text-wb-accent">Fwd+Bwd</span> vs <span class="text-wb-blue">Train</span></div>
                 <div style="height: 900px;">
                     <canvas x-ref="kernelsCompareChart"></canvas>
                 </div>
@@ -145,7 +166,7 @@
 
             <!-- Attention Comparison -->
             <div class="bg-wb-card border border-wb-border rounded-lg p-4 mb-4">
-                <div class="text-sm font-medium text-white mb-3">Attention Operations: <span class="text-wb-green">Forward</span> vs <span class="text-wb-accent">Fwd+Bwd</span></div>
+                <div class="text-sm font-medium text-white mb-3">Attention Operations: <span class="text-wb-green">Forward</span> vs <span class="text-wb-accent">Fwd+Bwd</span> vs <span class="text-wb-blue">Train</span></div>
                 <div class="h-64">
                     <canvas x-ref="attnCompareChart"></canvas>
                 </div>
@@ -159,6 +180,7 @@
                         <select x-model="tablePass" @change="updateTable()" class="bg-wb-bg border border-wb-border rounded px-2 py-1 text-xs text-wb-text">
                             <option value="forward">Forward Only</option>
                             <option value="backward">Fwd + Bwd</option>
+                            <option value="train">Train Step</option>
                         </select>
                         <input type="text" x-model="searchQuery" @input="updateTable()" placeholder="Search..." 
                                class="bg-wb-bg border border-wb-border rounded px-2 py-1 text-xs text-wb-text w-40 focus:border-wb-accent focus:outline-none">
@@ -241,6 +263,7 @@
                     'FFN': [/ffn\//i, /block\/ffn/i],
                     'Linear': [/linear/i, /proj/i],
                     'Softmax': [/softmax/i],
+                    'Optimizer': [/adam/i, /sgd/i, /optimizer/i, /step/i, /param.*update/i],
                     'Memory': [/copy/i, /memcpy/i, /clone/i],
                     'Elem': [/elementwise/i, /add/i, /mul/i, /div/i, /sub/i],
                     'RoPE': [/rope/i],
@@ -248,8 +271,8 @@
 
                 categoryColors: {
                     'MatMul': '#f59e0b', 'Attention': '#a371f7', 'Norm': '#f85149', 'FFN': '#3fb950',
-                    'Linear': '#58a6ff', 'Softmax': '#79c0ff', 'Memory': '#8b949e', 'Elem': '#d2a8ff',
-                    'RoPE': '#ffa657', 'Other': '#484f58',
+                    'Linear': '#58a6ff', 'Softmax': '#79c0ff', 'Optimizer': '#ff7b72', 'Memory': '#8b949e', 
+                    'Elem': '#d2a8ff', 'RoPE': '#ffa657', 'Other': '#484f58',
                 },
 
                 init() {
@@ -260,6 +283,7 @@
                 get modelMeta() {
                     if (!this.model) return [];
                     return [
+                        { label: 'Precision', value: this.model.precision || (this.model.use_amp ? 'BF16' : 'FP32') },
                         { label: 'Layers', value: this.model.num_layers },
                         { label: 'Heads', value: this.model.num_heads },
                         { label: 'd_model', value: this.model.d_model },
@@ -289,10 +313,66 @@
                     return (fwd && fwdBwd) ? fwdBwd - fwd : null;
                 },
 
+                get trainPerStep() {
+                    const total = this.model?.train?.total_cuda_time_ms;
+                    return total ? total / this.numSteps : null;
+                },
+
+                get optimOnlyPerStep() {
+                    const train = this.trainPerStep;
+                    const fwdBwd = this.fwdBwdPerStep;
+                    return (train && fwdBwd) ? train - fwdBwd : null;
+                },
+
                 get bwdFwdRatio() {
                     const fwd = this.fwdPerStep;
                     const bwdOnly = this.bwdOnlyPerStep;
                     return (fwd && bwdOnly) ? (bwdOnly / fwd).toFixed(2) + 'x' : '--';
+                },
+
+                get hasPrecisionComparison() {
+                    if (!this.data || this.data.length < 2) return false;
+                    // Check if we have both FP32 and BF16 data for any model size
+                    const sizes = new Set(this.data.map(d => d.size));
+                    for (const size of sizes) {
+                        const models = this.data.filter(d => d.size === size);
+                        const hasFP32 = models.some(d => !d.use_amp && d.precision !== 'BF16');
+                        const hasBF16 = models.some(d => d.use_amp || d.precision === 'BF16');
+                        if (hasFP32 && hasBF16) return true;
+                    }
+                    return false;
+                },
+
+                get precisionComparisonData() {
+                    if (!this.data) return null;
+                    // Group by model size
+                    const sizeOrder = ['small', 'medium', 'large', 'xl', '2.7B'];
+                    const sizes = [...new Set(this.data.map(d => d.size))].sort(
+                        (a, b) => (sizeOrder.indexOf(a) ?? 999) - (sizeOrder.indexOf(b) ?? 999)
+                    );
+                    
+                    const result = { sizes: [], fp32: { fwd: [], bwd: [], train: [] }, bf16: { fwd: [], bwd: [], train: [] } };
+                    
+                    for (const size of sizes) {
+                        const models = this.data.filter(d => d.size === size);
+                        const fp32 = models.find(d => !d.use_amp && d.precision !== 'BF16');
+                        const bf16 = models.find(d => d.use_amp || d.precision === 'BF16');
+                        
+                        if (fp32 || bf16) {
+                            result.sizes.push(size);
+                            const fp32Steps = fp32?.num_steps || 1;
+                            const bf16Steps = bf16?.num_steps || 1;
+                            
+                            result.fp32.fwd.push(fp32 ? (fp32.forward?.total_cuda_time_ms || 0) / fp32Steps : 0);
+                            result.fp32.bwd.push(fp32 ? (fp32.backward?.total_cuda_time_ms || 0) / fp32Steps : 0);
+                            result.fp32.train.push(fp32 ? (fp32.train?.total_cuda_time_ms || 0) / fp32Steps : 0);
+                            
+                            result.bf16.fwd.push(bf16 ? (bf16.forward?.total_cuda_time_ms || 0) / bf16Steps : 0);
+                            result.bf16.bwd.push(bf16 ? (bf16.backward?.total_cuda_time_ms || 0) / bf16Steps : 0);
+                            result.bf16.train.push(bf16 ? (bf16.train?.total_cuda_time_ms || 0) / bf16Steps : 0);
+                        }
+                    }
+                    return result;
                 },
 
                 get exportText() {
@@ -304,7 +384,9 @@
                     t += `Layers: ${m.num_layers} | Heads: ${m.num_heads} | Batch: ${m.batch_size} | Steps: ${m.num_steps}\n\n`;
                     t += `Forward Only CUDA: ${this.formatTime(this.fwdPerStep)}\n`;
                     t += `Fwd+Bwd CUDA: ${this.formatTime(this.fwdBwdPerStep)}\n`;
+                    t += `Train Step CUDA: ${this.formatTime(this.trainPerStep)}\n`;
                     t += `Bwd Only CUDA: ${this.formatTime(this.bwdOnlyPerStep)}\n`;
+                    t += `Optim Only CUDA: ${this.formatTime(this.optimOnlyPerStep)}\n`;
                     t += `Bwd/Fwd Ratio: ${this.bwdFwdRatio}\n\n`;
                     t += `Forward Breakdown (per step):\n`;
                     const perStepDivisor = this.numSteps;
@@ -339,7 +421,7 @@
                 },
 
                 loadDemo() {
-                    this.data = [DEMO_DATA];
+                    this.data = DEMO_DATA;  // Already an array with FP32/BF16 comparison
                     this.selectedIndex = 0;
                     this.onModelChange();
                 },
@@ -417,10 +499,67 @@
                 },
 
                 renderCharts() {
+                    this.renderPrecisionChart();
                     this.renderOpChart();
                     this.renderCompareChart();
                     this.renderKernelsCompareChart();
                     this.renderAttnCompareChart();
+                },
+
+                renderPrecisionChart() {
+                    const ctx = this.$refs.precisionChart?.getContext('2d');
+                    if (!ctx || !this.hasPrecisionComparison) return;
+                    
+                    const data = this.precisionComparisonData;
+                    if (!data) return;
+                    
+                    if (this.charts.precision) this.charts.precision.destroy();
+                    
+                    this.charts.precision = new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels: data.sizes,
+                            datasets: [
+                                { label: 'FP32 Forward', data: data.fp32.fwd, backgroundColor: '#3fb950', stack: 'fp32' },
+                                { label: 'FP32 Bwd Only', data: data.fp32.bwd.map((v, i) => v - data.fp32.fwd[i]), backgroundColor: '#22863a', stack: 'fp32' },
+                                { label: 'FP32 Optim', data: data.fp32.train.map((v, i) => v - data.fp32.bwd[i]), backgroundColor: '#144620', stack: 'fp32' },
+                                { label: 'BF16 Forward', data: data.bf16.fwd, backgroundColor: '#f59e0b', stack: 'bf16' },
+                                { label: 'BF16 Bwd Only', data: data.bf16.bwd.map((v, i) => v - data.bf16.fwd[i]), backgroundColor: '#b45309', stack: 'bf16' },
+                                { label: 'BF16 Optim', data: data.bf16.train.map((v, i) => v - data.bf16.bwd[i]), backgroundColor: '#78350f', stack: 'bf16' },
+                            ]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: { labels: { boxWidth: 12, font: { size: 11 } } },
+                                tooltip: {
+                                    callbacks: {
+                                        label: ctx => `${ctx.dataset.label}: ${ctx.raw.toFixed(2)} ms`,
+                                        afterBody: (items) => {
+                                            const idx = items[0].dataIndex;
+                                            const fp32Total = data.fp32.train[idx];
+                                            const bf16Total = data.bf16.train[idx];
+                                            if (fp32Total && bf16Total) {
+                                                const speedup = (fp32Total / bf16Total).toFixed(2);
+                                                return `\nSpeedup: ${speedup}x`;
+                                            }
+                                            return '';
+                                        }
+                                    }
+                                }
+                            },
+                            scales: {
+                                x: { grid: { display: false }, ticks: { font: { size: 11 } } },
+                                y: { 
+                                    grid: { color: '#21262d' }, 
+                                    ticks: { font: { size: 10 } },
+                                    title: { display: true, text: 'Time (ms)', font: { size: 10 } },
+                                    stacked: true
+                                }
+                            }
+                        }
+                    });
                 },
 
                 renderOpChart() {
@@ -449,7 +588,8 @@
                     if (!ctx) return;
                     const fwdCats = this.categorize(this.model?.forward?.top_events || []);
                     const bwdCats = this.categorize(this.model?.backward?.top_events || []);
-                    const labels = [...new Set([...Object.keys(fwdCats), ...Object.keys(bwdCats)])];
+                    const trainCats = this.categorize(this.model?.train?.top_events || []);
+                    const labels = [...new Set([...Object.keys(fwdCats), ...Object.keys(bwdCats), ...Object.keys(trainCats)])];
                     if (this.charts.compare) this.charts.compare.destroy();
                     this.charts.compare = new Chart(ctx, {
                         type: 'bar',
@@ -458,6 +598,7 @@
                             datasets: [
                                 { label: 'Forward', data: labels.map(l => fwdCats[l] || 0), backgroundColor: '#3fb950' },
                                 { label: 'Fwd+Bwd', data: labels.map(l => bwdCats[l] || 0), backgroundColor: '#f59e0b' },
+                                { label: 'Train', data: labels.map(l => trainCats[l] || 0), backgroundColor: '#58a6ff' },
                             ]
                         },
                         options: {
@@ -475,30 +616,39 @@
                     const ctx = this.$refs.kernelsCompareChart?.getContext('2d');
                     if (!ctx) return;
                     
-                    // Get top kernels from both passes and merge by name
+                    // Get top kernels from all passes and merge by name
                     const fwdEvents = this.model?.forward?.top_events || [];
                     const bwdEvents = this.model?.backward?.top_events || [];
+                    const trainEvents = this.model?.train?.top_events || [];
                     
                     // Create a map of all kernel names with their times
                     const kernelMap = new Map();
-                    fwdEvents.forEach(e => kernelMap.set(e.name, { fwd: e.cuda_time_ms, bwd: 0 }));
+                    fwdEvents.forEach(e => kernelMap.set(e.name, { fwd: e.cuda_time_ms, bwd: 0, train: 0 }));
                     bwdEvents.forEach(e => {
                         if (kernelMap.has(e.name)) {
                             kernelMap.get(e.name).bwd = e.cuda_time_ms;
                         } else {
-                            kernelMap.set(e.name, { fwd: 0, bwd: e.cuda_time_ms });
+                            kernelMap.set(e.name, { fwd: 0, bwd: e.cuda_time_ms, train: 0 });
+                        }
+                    });
+                    trainEvents.forEach(e => {
+                        if (kernelMap.has(e.name)) {
+                            kernelMap.get(e.name).train = e.cuda_time_ms;
+                        } else {
+                            kernelMap.set(e.name, { fwd: 0, bwd: 0, train: e.cuda_time_ms });
                         }
                     });
                     
-                    // Sort by max of fwd or bwd time and take top 15
+                    // Sort by max time across all passes and take top 30
                     const sorted = [...kernelMap.entries()]
-                        .sort((a, b) => Math.max(b[1].fwd, b[1].bwd) - Math.max(a[1].fwd, a[1].bwd))
+                        .sort((a, b) => Math.max(b[1].fwd, b[1].bwd, b[1].train) - Math.max(a[1].fwd, a[1].bwd, a[1].train))
                         .slice(0, 30);
                     
                     const labels = sorted.map(([name]) => this.truncate(name, 28));
                     const fullNames = sorted.map(([name]) => name);
                     const fwdData = sorted.map(([, v]) => v.fwd);
                     const bwdData = sorted.map(([, v]) => v.bwd);
+                    const trainData = sorted.map(([, v]) => v.train);
                     
                     if (this.charts.kernelsCompare) this.charts.kernelsCompare.destroy();
                     this.charts.kernelsCompare = new Chart(ctx, {
@@ -508,6 +658,7 @@
                             datasets: [
                                 { label: 'Forward', data: fwdData, backgroundColor: '#3fb950' },
                                 { label: 'Fwd+Bwd', data: bwdData, backgroundColor: '#f59e0b' },
+                                { label: 'Train', data: trainData, backgroundColor: '#58a6ff' },
                             ]
                         },
                         options: {
@@ -535,7 +686,8 @@
                     
                     const fwdOps = this.categorizeAttention(this.model?.forward?.top_events || []);
                     const bwdOps = this.categorizeAttention(this.model?.backward?.top_events || []);
-                    const labels = [...new Set([...Object.keys(fwdOps), ...Object.keys(bwdOps)])];
+                    const trainOps = this.categorizeAttention(this.model?.train?.top_events || []);
+                    const labels = [...new Set([...Object.keys(fwdOps), ...Object.keys(bwdOps), ...Object.keys(trainOps)])];
                     
                     if (this.charts.attnCompare) this.charts.attnCompare.destroy();
                     this.charts.attnCompare = new Chart(ctx, {
@@ -545,6 +697,7 @@
                             datasets: [
                                 { label: 'Forward', data: labels.map(l => fwdOps[l] || 0), backgroundColor: '#3fb950' },
                                 { label: 'Fwd+Bwd', data: labels.map(l => bwdOps[l] || 0), backgroundColor: '#f59e0b' },
+                                { label: 'Train', data: labels.map(l => trainOps[l] || 0), backgroundColor: '#58a6ff' },
                             ]
                         },
                         options: {
@@ -596,57 +749,75 @@
             };
         }
 
-        const DEMO_DATA = {
-            size: "small", num_params: 128625408, batch_size: 4, context_length: 128,
-            d_model: 768, d_ff: 3072, num_layers: 12, num_heads: 12, num_steps: 10,
-            forward: {
-                total_cuda_time_us: 695396.40, total_cuda_time_ms: 695.40,
-                total_cpu_time_us: 548365.79, total_cpu_time_ms: 548.37, num_events: 108,
-                top_events: [
-                    {name: "block/attention", cuda_time_us: 160194.38, cuda_time_ms: 160.19, cuda_time_pct: 23.04, cpu_time_us: 0, cpu_time_ms: 0, count: 120, cuda_time_avg_us: 1334.95},
-                    {name: "attn/rope", cuda_time_us: 91138.78, cuda_time_ms: 91.14, cuda_time_pct: 13.11, cpu_time_us: 0, cpu_time_ms: 0, count: 120, cuda_time_avg_us: 759.49},
-                    {name: "rmsnorm", cuda_time_us: 53686.61, cuda_time_ms: 53.69, cuda_time_pct: 7.72, cpu_time_us: 0, cpu_time_ms: 0, count: 250, cuda_time_avg_us: 214.75},
-                    {name: "aten::einsum", cuda_time_us: 29527.96, cuda_time_ms: 29.53, cuda_time_pct: 4.25, cpu_time_us: 35749.53, cpu_time_ms: 35.75, count: 1350, cuda_time_avg_us: 21.87},
-                    {name: "aten::bmm", cuda_time_us: 25509.33, cuda_time_ms: 25.51, cuda_time_pct: 3.67, cpu_time_us: 35444.49, cpu_time_ms: 35.44, count: 1100, cuda_time_avg_us: 23.19},
-                    {name: "linear", cuda_time_us: 22258.38, cuda_time_ms: 22.26, cuda_time_pct: 3.20, cpu_time_us: 0, cpu_time_ms: 0, count: 610, cuda_time_avg_us: 36.49},
-                    {name: "sdpa/attention_scores", cuda_time_us: 20627.03, cuda_time_ms: 20.63, cuda_time_pct: 2.97, cpu_time_us: 0, cpu_time_ms: 0, count: 120, cuda_time_avg_us: 171.89},
-                    {name: "block/ffn", cuda_time_us: 18143.35, cuda_time_ms: 18.14, cuda_time_pct: 2.61, cpu_time_us: 7865.52, cpu_time_ms: 7.87, count: 120, cuda_time_avg_us: 151.19},
-                    {name: "sdpa/softmax", cuda_time_us: 18024.06, cuda_time_ms: 18.02, cuda_time_pct: 2.59, cpu_time_us: 0, cpu_time_ms: 0, count: 120, cuda_time_avg_us: 150.20},
-                    {name: "void cutlass::Kernel2<cutlass_80_tensorop_s1688gemm>", cuda_time_us: 13449.63, cuda_time_ms: 13.45, cuda_time_pct: 1.93, cpu_time_us: 0, cpu_time_ms: 0, count: 360, cuda_time_avg_us: 37.36},
-                    {name: "attn/sdpa", cuda_time_us: 12121.43, cuda_time_ms: 12.12, cuda_time_pct: 1.74, cpu_time_us: 11460.10, cpu_time_ms: 11.46, count: 120, cuda_time_avg_us: 101.01},
-                    {name: "sdpa/mask", cuda_time_us: 10574.07, cuda_time_ms: 10.57, cuda_time_pct: 1.52, cpu_time_us: 0, cpu_time_ms: 0, count: 120, cuda_time_avg_us: 88.12},
-                    {name: "aten::mul", cuda_time_us: 8444.57, cuda_time_ms: 8.44, cuda_time_pct: 1.21, cpu_time_us: 13796.06, cpu_time_ms: 13.80, count: 1450, cuda_time_avg_us: 5.82},
-                    {name: "aten::copy_", cuda_time_us: 6619.64, cuda_time_ms: 6.62, cuda_time_pct: 0.95, cpu_time_us: 11049.05, cpu_time_ms: 11.05, count: 1320, cuda_time_avg_us: 5.01},
-                    {name: "sdpa/output_matmul", cuda_time_us: 6126.61, cuda_time_ms: 6.13, cuda_time_pct: 0.88, cpu_time_us: 0, cpu_time_ms: 0, count: 120, cuda_time_avg_us: 51.06},
-                    {name: "ffn/silu", cuda_time_us: 5717.72, cuda_time_ms: 5.72, cuda_time_pct: 0.82, cpu_time_us: 0, cpu_time_ms: 0, count: 120, cuda_time_avg_us: 47.65},
-                    {name: "ffn/down_proj", cuda_time_us: 5370.90, cuda_time_ms: 5.37, cuda_time_pct: 0.77, cpu_time_us: 2962.05, cpu_time_ms: 2.96, count: 120, cuda_time_avg_us: 44.76},
-                    {name: "ffn/gate_proj", cuda_time_us: 4562.58, cuda_time_ms: 4.56, cuda_time_pct: 0.66, cpu_time_us: 2463.48, cpu_time_ms: 2.46, count: 120, cuda_time_avg_us: 38.02},
-                    {name: "ffn/up_proj", cuda_time_us: 4486.76, cuda_time_ms: 4.49, cuda_time_pct: 0.65, cpu_time_us: 2899.90, cpu_time_ms: 2.90, count: 120, cuda_time_avg_us: 37.39},
-                    {name: "attn/qkv_proj", cuda_time_us: 4400.28, cuda_time_ms: 4.40, cuda_time_pct: 0.63, cpu_time_us: 6382.70, cpu_time_ms: 6.38, count: 120, cuda_time_avg_us: 36.67}
-                ]
+        // Demo data with FP32 vs BF16 comparison for multiple model sizes
+        const DEMO_DATA = [
+            // Small FP32
+            {
+                size: "small", num_params: 128625408, batch_size: 4, context_length: 128,
+                d_model: 768, d_ff: 3072, num_layers: 12, num_heads: 12, num_steps: 10,
+                use_amp: false, precision: "FP32",
+                forward: { total_cuda_time_us: 230000, total_cuda_time_ms: 230, num_events: 108, top_events: [
+                    {name: "aten::mm", cuda_time_us: 45000, cuda_time_ms: 45, cuda_time_pct: 19.6, cpu_time_us: 0, cpu_time_ms: 0, count: 610, cuda_time_avg_us: 73.8},
+                    {name: "aten::bmm", cuda_time_us: 38000, cuda_time_ms: 38, cuda_time_pct: 16.5, cpu_time_us: 0, cpu_time_ms: 0, count: 240, cuda_time_avg_us: 158.3},
+                    {name: "rmsnorm", cuda_time_us: 28000, cuda_time_ms: 28, cuda_time_pct: 12.2, cpu_time_us: 0, cpu_time_ms: 0, count: 250, cuda_time_avg_us: 112},
+                    {name: "attn/softmax", cuda_time_us: 18000, cuda_time_ms: 18, cuda_time_pct: 7.8, cpu_time_us: 0, cpu_time_ms: 0, count: 120, cuda_time_avg_us: 150},
+                    {name: "aten::mul", cuda_time_us: 12000, cuda_time_ms: 12, cuda_time_pct: 5.2, cpu_time_us: 0, cpu_time_ms: 0, count: 1450, cuda_time_avg_us: 8.3}
+                ]},
+                backward: { total_cuda_time_us: 720000, total_cuda_time_ms: 720, num_events: 211, top_events: [] },
+                train: { total_cuda_time_us: 780000, total_cuda_time_ms: 780, num_events: 250, top_events: [] }
             },
-            backward: {
-                total_cuda_time_us: 1309771.89, total_cuda_time_ms: 1309.77,
-                total_cpu_time_us: 2424087.34, total_cpu_time_ms: 2424.09, num_events: 211,
-                top_events: [
-                    {name: "block/attention", cuda_time_us: 155327.79, cuda_time_ms: 155.33, cuda_time_pct: 11.86, cpu_time_us: 0, cpu_time_ms: 0, count: 120, cuda_time_avg_us: 1294.40},
-                    {name: "attn/rope", cuda_time_us: 89934.28, cuda_time_ms: 89.93, cuda_time_pct: 6.87, cpu_time_us: 0, cpu_time_ms: 0, count: 120, cuda_time_avg_us: 749.45},
-                    {name: "aten::bmm", cuda_time_us: 86996.34, cuda_time_ms: 87.00, cuda_time_pct: 6.64, cpu_time_us: 152556.83, cpu_time_ms: 152.56, count: 3300, cuda_time_avg_us: 26.36},
-                    {name: "BmmBackward0", cuda_time_us: 61449.30, cuda_time_ms: 61.45, cuda_time_pct: 4.69, cpu_time_us: 31477.39, cpu_time_ms: 31.48, count: 1100, cuda_time_avg_us: 55.86},
-                    {name: "rmsnorm", cuda_time_us: 58524.02, cuda_time_ms: 58.52, cuda_time_pct: 4.47, cpu_time_us: 0, cpu_time_ms: 0, count: 250, cuda_time_avg_us: 234.10},
-                    {name: "aten::copy_", cuda_time_us: 40611.46, cuda_time_ms: 40.61, cuda_time_pct: 3.10, cpu_time_us: 48127.27, cpu_time_ms: 48.13, count: 4100, cuda_time_avg_us: 9.91},
-                    {name: "aten::einsum", cuda_time_us: 29571.20, cuda_time_ms: 29.57, cuda_time_pct: 2.26, cpu_time_us: 29069.85, cpu_time_ms: 29.07, count: 1350, cuda_time_avg_us: 21.90},
-                    {name: "aten::mul", cuda_time_us: 25997.22, cuda_time_ms: 26.00, cuda_time_pct: 1.98, cpu_time_us: 94302.44, cpu_time_ms: 94.30, count: 4260, cuda_time_avg_us: 6.10},
-                    {name: "linear", cuda_time_us: 22293.96, cuda_time_ms: 22.29, cuda_time_pct: 1.70, cpu_time_us: 0, cpu_time_ms: 0, count: 610, cuda_time_avg_us: 36.55},
-                    {name: "AccumulateGrad", cuda_time_us: 21067.69, cuda_time_ms: 21.07, cuda_time_pct: 1.61, cpu_time_us: 19222.32, cpu_time_ms: 19.22, count: 870, cuda_time_avg_us: 24.22},
-                    {name: "MulBackward0", cuda_time_us: 20025.99, cuda_time_ms: 20.03, cuda_time_pct: 1.53, cpu_time_us: 42641.30, cpu_time_ms: 42.64, count: 1450, cuda_time_avg_us: 13.81},
-                    {name: "sdpa/softmax", cuda_time_us: 18709.16, cuda_time_ms: 18.71, cuda_time_pct: 1.43, cpu_time_us: 0, cpu_time_ms: 0, count: 120, cuda_time_avg_us: 155.91},
-                    {name: "block/ffn", cuda_time_us: 18179.98, cuda_time_ms: 18.18, cuda_time_pct: 1.39, cpu_time_us: 6921.12, cpu_time_ms: 6.92, count: 120, cuda_time_avg_us: 151.50},
-                    {name: "sdpa/attention_scores", cuda_time_us: 18142.54, cuda_time_ms: 18.14, cuda_time_pct: 1.39, cpu_time_us: 0, cpu_time_ms: 0, count: 120, cuda_time_avg_us: 151.19},
-                    {name: "DivBackward0", cuda_time_us: 16061.78, cuda_time_ms: 16.06, cuda_time_pct: 1.23, cpu_time_us: 22292.57, cpu_time_ms: 22.29, count: 740, cuda_time_avg_us: 21.71}
-                ]
+            // Small BF16
+            {
+                size: "small", num_params: 128625408, batch_size: 4, context_length: 128,
+                d_model: 768, d_ff: 3072, num_layers: 12, num_heads: 12, num_steps: 10,
+                use_amp: true, precision: "BF16",
+                forward: { total_cuda_time_us: 150000, total_cuda_time_ms: 150, num_events: 108, top_events: [
+                    {name: "aten::mm", cuda_time_us: 28000, cuda_time_ms: 28, cuda_time_pct: 18.7, cpu_time_us: 0, cpu_time_ms: 0, count: 610, cuda_time_avg_us: 45.9},
+                    {name: "aten::bmm", cuda_time_us: 24000, cuda_time_ms: 24, cuda_time_pct: 16.0, cpu_time_us: 0, cpu_time_ms: 0, count: 240, cuda_time_avg_us: 100},
+                    {name: "rmsnorm", cuda_time_us: 22000, cuda_time_ms: 22, cuda_time_pct: 14.7, cpu_time_us: 0, cpu_time_ms: 0, count: 250, cuda_time_avg_us: 88},
+                    {name: "attn/softmax", cuda_time_us: 11000, cuda_time_ms: 11, cuda_time_pct: 7.3, cpu_time_us: 0, cpu_time_ms: 0, count: 120, cuda_time_avg_us: 91.7},
+                    {name: "aten::mul", cuda_time_us: 8000, cuda_time_ms: 8, cuda_time_pct: 5.3, cpu_time_us: 0, cpu_time_ms: 0, count: 1450, cuda_time_avg_us: 5.5}
+                ]},
+                backward: { total_cuda_time_us: 480000, total_cuda_time_ms: 480, num_events: 211, top_events: [] },
+                train: { total_cuda_time_us: 520000, total_cuda_time_ms: 520, num_events: 250, top_events: [] }
+            },
+            // Medium FP32
+            {
+                size: "medium", num_params: 424673280, batch_size: 4, context_length: 128,
+                d_model: 1024, d_ff: 4096, num_layers: 24, num_heads: 16, num_steps: 10,
+                use_amp: false, precision: "FP32",
+                forward: { total_cuda_time_us: 680000, total_cuda_time_ms: 680, num_events: 108, top_events: [] },
+                backward: { total_cuda_time_us: 1950000, total_cuda_time_ms: 1950, num_events: 211, top_events: [] },
+                train: { total_cuda_time_us: 2100000, total_cuda_time_ms: 2100, num_events: 250, top_events: [] }
+            },
+            // Medium BF16
+            {
+                size: "medium", num_params: 424673280, batch_size: 4, context_length: 128,
+                d_model: 1024, d_ff: 4096, num_layers: 24, num_heads: 16, num_steps: 10,
+                use_amp: true, precision: "BF16",
+                forward: { total_cuda_time_us: 420000, total_cuda_time_ms: 420, num_events: 108, top_events: [] },
+                backward: { total_cuda_time_us: 1200000, total_cuda_time_ms: 1200, num_events: 211, top_events: [] },
+                train: { total_cuda_time_us: 1300000, total_cuda_time_ms: 1300, num_events: 250, top_events: [] }
+            },
+            // Large FP32
+            {
+                size: "large", num_params: 973078528, batch_size: 4, context_length: 128,
+                d_model: 1280, d_ff: 5120, num_layers: 36, num_heads: 20, num_steps: 10,
+                use_amp: false, precision: "FP32",
+                forward: { total_cuda_time_us: 1450000, total_cuda_time_ms: 1450, num_events: 108, top_events: [] },
+                backward: { total_cuda_time_us: 4200000, total_cuda_time_ms: 4200, num_events: 211, top_events: [] },
+                train: { total_cuda_time_us: 4500000, total_cuda_time_ms: 4500, num_events: 250, top_events: [] }
+            },
+            // Large BF16
+            {
+                size: "large", num_params: 973078528, batch_size: 4, context_length: 128,
+                d_model: 1280, d_ff: 5120, num_layers: 36, num_heads: 20, num_steps: 10,
+                use_amp: true, precision: "BF16",
+                forward: { total_cuda_time_us: 850000, total_cuda_time_ms: 850, num_events: 108, top_events: [] },
+                backward: { total_cuda_time_us: 2500000, total_cuda_time_ms: 2500, num_events: 211, top_events: [] },
+                train: { total_cuda_time_us: 2700000, total_cuda_time_ms: 2700, num_events: 250, top_events: [] }
             }
-        };
+        ];
     </script>
 </body>
 </html>

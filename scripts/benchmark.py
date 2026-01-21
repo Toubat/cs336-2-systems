@@ -1,4 +1,5 @@
 import time
+from contextlib import nullcontext
 
 import chz
 import numpy as np
@@ -18,6 +19,7 @@ def benchmark_model(
     warmup_steps: int,
     num_steps: int,
     batch_size: int,
+    use_amp: bool = False,
 ):
     device = "cuda:0"
     config = ModelConfig()
@@ -26,8 +28,12 @@ def benchmark_model(
     except Exception:
         nvtx = None
 
+    precision_str = "BF16" if use_amp else "FP32"
+    amp_context = torch.autocast(device_type="cuda", dtype=torch.bfloat16) if use_amp else nullcontext()
+
     print(f"\n{'=' * 60}")
     print(f"Benchmarking {size} model: d_model={d_model}, d_ff={d_ff}, num_layers={num_layers}, num_heads={num_heads}")
+    print(f"Precision: {precision_str}")
     print(f"{'=' * 60}")
 
     model = TransformerLM(
@@ -56,8 +62,9 @@ def benchmark_model(
     if nvtx is not None:
         nvtx.range_push("warmup")
     for _ in range(warmup_steps):
-        logits = model(x)
-        logits.mean().backward()
+        with amp_context:
+            logits = model(x)
+            logits.mean().backward()
         model.zero_grad()
     if nvtx is not None:
         nvtx.range_pop()
@@ -71,7 +78,8 @@ def benchmark_model(
     for _ in range(num_steps):
         torch.cuda.synchronize()
         start = time.perf_counter()
-        _ = model(x)
+        with amp_context:
+            _ = model(x)
         torch.cuda.synchronize()
         forward_times.append((time.perf_counter() - start) * 1000)  # ms
     if nvtx is not None:
@@ -85,8 +93,9 @@ def benchmark_model(
     for _ in range(num_steps):
         torch.cuda.synchronize()
         start = time.perf_counter()
-        logits = model(x)
-        logits.mean().backward()
+        with amp_context:
+            logits = model(x)
+            logits.mean().backward()
         torch.cuda.synchronize()
         backward_times.append((time.perf_counter() - start) * 1000)  # ms
         model.zero_grad()
@@ -100,6 +109,8 @@ def benchmark_model(
         "size": size,
         "num_params": num_params,
         "batch_size": batch_size,
+        "use_amp": use_amp,
+        "precision": precision_str,
         "forward_mean": float(forward_times_arr.mean()),
         "forward_std": float(forward_times_arr.std()),
         "backward_mean": float(backward_times_arr.mean()),
@@ -119,6 +130,7 @@ class BenchmarkConfig:
     warmup_steps: int = 10
     num_steps: int = 20
     batch_size: int = 4
+    use_amp: bool = False  # Enable BF16 mixed precision
 
 
 def main(config: BenchmarkConfig):
@@ -131,6 +143,7 @@ def main(config: BenchmarkConfig):
         warmup_steps=config.warmup_steps,
         num_steps=config.num_steps,
         batch_size=config.batch_size,
+        use_amp=config.use_amp,
     )
     print(results)
 

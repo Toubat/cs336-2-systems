@@ -37,6 +37,7 @@ def benchmark_model(
     warmup_steps: int,
     num_steps: int,
     batch_size: int,
+    use_amp: bool = False,
 ) -> dict:
     import subprocess
 
@@ -52,6 +53,7 @@ def benchmark_model(
             f"warmup_steps={warmup_steps}",
             f"num_steps={num_steps}",
             f"batch_size={batch_size}",
+            f"use_amp={use_amp}",
         ],
         capture_output=True,
         text=True,
@@ -71,10 +73,26 @@ def benchmark_model(
 
 
 @app.local_entrypoint()
-async def main(warmup_steps: int = 5, num_steps: int = 10, batch_size: int = 4):
+async def main(
+    warmup_steps: int = 5,
+    num_steps: int = 10,
+    batch_size: int = 4,
+    use_amp: bool = False,
+    compare_precision: bool = False,  # Run both FP32 and BF16 for comparison
+):
     import asyncio
 
-    print(f"Running benchmarks with warmup_steps={warmup_steps}, num_steps={num_steps}, batch_size={batch_size}")
+    if compare_precision:
+        print(
+            f"Running benchmarks (FP32 vs BF16) with warmup_steps={warmup_steps}, num_steps={num_steps}, batch_size={batch_size}"
+        )
+        amp_modes = [False, True]
+    else:
+        precision_str = "BF16" if use_amp else "FP32"
+        print(
+            f"Running benchmarks ({precision_str}) with warmup_steps={warmup_steps}, num_steps={num_steps}, batch_size={batch_size}"
+        )
+        amp_modes = [use_amp]
     print()
 
     all_results = await asyncio.gather(
@@ -88,27 +106,33 @@ async def main(warmup_steps: int = 5, num_steps: int = 10, batch_size: int = 4):
                 warmup_steps=warmup_steps,
                 num_steps=num_steps,
                 batch_size=batch_size,
+                use_amp=amp,
             )
             for size, config in MODEL_CONFIGS.items()
+            for amp in amp_modes
         ]
     )
 
     # Print summary table
-    print("\n" + "=" * 80)
+    print("\n" + "=" * 110)
     print("SUMMARY")
-    print("=" * 80)
-    print(f"{'Size':<10} {'Params':<12} {'Forward (ms)':<22} {'Backward (ms)':<22}")
-    print("-" * 80)
+    print("=" * 110)
+    print(f"{'Size':<10} {'Precision':<10} {'Params':<12} {'Forward (ms)':<22} {'Backward (ms)':<22}")
+    print("-" * 110)
 
-    # Sort by model size order
+    # Sort by model size order, then by precision
     size_order = ["small", "medium", "large", "xl", "2.7B"]
-    sorted_results = sorted(all_results, key=lambda x: size_order.index(x["size"]) if x["size"] in size_order else 999)
+    sorted_results = sorted(
+        all_results,
+        key=lambda x: (size_order.index(x["size"]) if x["size"] in size_order else 999, x.get("use_amp", False)),
+    )
 
     for r in sorted_results:
+        precision = r.get("precision", "BF16" if r.get("use_amp") else "FP32")
         params = f"{r.get('num_params', 0) / 1e9:.2f}B"
         forward = f"{r.get('forward_mean', 0):.2f} ± {r.get('forward_std', 0):.2f}"
         backward = f"{r.get('backward_mean', 0):.2f} ± {r.get('backward_std', 0):.2f}"
-        print(f"{r['size']:<10} {params:<12} {forward:<22} {backward:<22}")
+        print(f"{r['size']:<10} {precision:<10} {params:<12} {forward:<22} {backward:<22}")
 
 
 """

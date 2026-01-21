@@ -19,14 +19,16 @@ class RMSNorm(nn.Module):
         self.gamma = nn.Parameter(torch.ones(d_model, device=device, dtype=dtype))
 
     def forward(self, x: Float[Tensor, " ... d"]) -> Float[Tensor, " ... d"]:
-        in_type = x.dtype
+        # in_type = x.dtype
+
+        # upscale to float32 for numerical stability
+        # x = x.to(torch.float32)
 
         # Use torch operations instead of einsum
         rms = (x * x).sum(dim=-1, keepdim=True)
         rms = rms / self.d_model + self.eps
         rms = rms.rsqrt()  # rsqrt is faster than sqrt + divide
 
-        # upscale to float32 for numerical stability
-        x = x.to(torch.float32)
         x = x * rms * self.gamma
-        return x.to(in_type)
+        # return x.to(in_type)
+        return x

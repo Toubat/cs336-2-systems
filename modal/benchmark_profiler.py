@@ -67,6 +67,7 @@ def benchmark_model(
     num_steps: int,
     batch_size: int,
     context_length: int,
+    use_amp: bool = False,
 ):
     import subprocess
 
@@ -82,6 +83,7 @@ def benchmark_model(
         f"num_steps={num_steps}",
         f"batch_size={batch_size}",
         f"context_length={context_length}",
+        f"use_amp={use_amp}",
     ]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -92,6 +94,7 @@ def benchmark_model(
     return {
         "size": size,
         "context_length": context_length,
+        "use_amp": use_amp,
         "returncode": result.returncode,
         "stdout": result.stdout,
         "stderr": result.stderr,
@@ -104,8 +107,16 @@ async def main(
     num_steps: int = 10,
     batch_size: int = 4,
     context_length: int = 128,
+    use_amp: bool = False,
+    compare_precision: bool = False,  # Run both FP32 and BF16 for comparison
 ):
-    print(f"Running profiler benchmark: context_length={context_length}, batch_size={batch_size}")
+    if compare_precision:
+        print(f"Running profiler benchmark (FP32 vs BF16): context_length={context_length}, batch_size={batch_size}")
+        amp_modes = [False, True]
+    else:
+        precision_str = "BF16" if use_amp else "FP32"
+        print(f"Running profiler benchmark ({precision_str}): context_length={context_length}, batch_size={batch_size}")
+        amp_modes = [use_amp]
 
     results = await asyncio.gather(
         *[
@@ -119,8 +130,10 @@ async def main(
                 num_steps=num_steps,
                 batch_size=batch_size,
                 context_length=context_length,
+                use_amp=amp,
             )
             for size, config in MODEL_CONFIGS.items()
+            for amp in amp_modes
         ]
     )
 
@@ -131,7 +144,8 @@ async def main(
     all_results = [parsed for result in results if (parsed := parse_encoded_from_stdout(result["stdout"]))]
 
     if all_results:
-        filename = f"{OUTPUT_DIR}/profile_{timestamp}.json"
+        suffix = "_compare" if compare_precision else ("_amp" if use_amp else "")
+        filename = f"{OUTPUT_DIR}/profile_{timestamp}{suffix}.json"
         with open(filename, "w") as f:
             json.dump(all_results, f, indent=2)
         print(f"Saved: {filename}")
