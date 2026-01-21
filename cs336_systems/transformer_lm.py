@@ -1,9 +1,10 @@
 import torch
+import torch.nn.functional as F
 from jaxtyping import Float, Int
 from torch import Tensor, nn
 
 from cs336_systems.bpe.tokenizer import Tokenizer
-from cs336_systems.nn import Embedding, Linear, RMSNorm, RoPEConfig, TransformerBlock, softmax
+from cs336_systems.nn import Embedding, Linear, RMSNorm, RoPEConfig, TransformerBlock
 
 
 class TransformerLM(nn.Module):
@@ -69,7 +70,7 @@ class TransformerLM(nn.Module):
             logits = self.forward(token_ids)
             last_logits = logits[:, -1, :]
 
-            probs = softmax(last_logits / (temperature + 1e-9))
+            probs = F.softmax(last_logits / (temperature + 1e-9), dim=-1)
             probs = probs.squeeze(0)  # (vocab_size,)
 
             if top_p < 1.0:

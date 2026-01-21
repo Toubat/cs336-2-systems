@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from typing import cast
-
 import torch
-from einops import einsum, repeat
+from einops import einsum, rearrange
 from jaxtyping import Float, Int
 from torch import Tensor, nn
 
@@ -42,7 +40,7 @@ class RotaryPositionalEmbedding(nn.Module):
         token_positions: Int[Tensor, "... seq_len"] | None = None,
     ) -> Float[Tensor, "... seq_len d_k"]:
         """
-        Apply RoPE to the input tensor.
+        Apply RoPE to the input tensor using complex number multiplication.
 
         Args:
             x (torch.Tensor): input tensor of shape (..., seq_len, d_k)
@@ -51,24 +49,21 @@ class RotaryPositionalEmbedding(nn.Module):
         Returns:
             torch.Tensor: output tensor of the same shape as x
         """
-        sin_table = cast(Tensor, self.sin_table)
-        cos_table = cast(Tensor, self.cos_table)
+        seq_len = x.shape[-2]
 
         if token_positions is None:
-            token_positions = torch.arange(x.shape[-2], device=x.device, dtype=torch.long)
-            token_positions = repeat(token_positions, "... -> 1 ...")
+            rope_sin = self.sin_table[:seq_len]  # type: ignore
+            rope_cos = self.cos_table[:seq_len]  # type: ignore
+        else:
+            rope_sin = self.sin_table[token_positions]  # type: ignore
+            rope_cos = self.cos_table[token_positions]  # type: ignore
 
-        rope_sin = sin_table[token_positions]  # (..., seq_len, d_k // 2)
-        rope_cos = cos_table[token_positions]  # (..., seq_len, d_k // 2)
+        x1, x2 = rearrange(x, "... (half_d xy) -> xy ... half_d", xy=2)
 
-        x_even, x_odd = x[..., 0::2], x[..., 1::2]
-        x_even_rot = x_even * rope_cos - x_odd * rope_sin
-        x_odd_rot = x_even * rope_sin + x_odd * rope_cos
+        x1_rot = x1 * rope_cos - x2 * rope_sin
+        x2_rot = x1 * rope_sin + x2 * rope_cos
 
-        x_rot = torch.zeros_like(x)
-        x_rot[..., 0::2] = x_even_rot
-        x_rot[..., 1::2] = x_odd_rot
-        return x_rot
+        return torch.stack([x1_rot, x2_rot], dim=-1).flatten(start_dim=-2)
 
 
 def apply_rope(

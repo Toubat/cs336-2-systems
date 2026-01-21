@@ -2,7 +2,6 @@ import torch
 from jaxtyping import Float
 from torch import Tensor, nn
 from torch.nn import functional as F
-from torch.profiler import record_function
 
 
 class FFN(nn.Module):
@@ -31,14 +30,10 @@ class FFN(nn.Module):
         self.w2 = Linear(d_ff, d_model, device=device, dtype=dtype)
 
     def forward(self, x: Float[Tensor, " ... d_model"]) -> Float[Tensor, " ... d_model"]:
-        with record_function("ffn/gate_proj"):
-            gate = self.w1(x)
-        with record_function("ffn/up_proj"):
-            up = self.w3(x)
-        with record_function("ffn/silu"):
-            activated = silu(gate) * up
-        with record_function("ffn/down_proj"):
-            return self.w2(activated)
+        gate = self.w1(x)
+        up = self.w3(x)
+        activated = silu(gate) * up
+        return self.w2(activated)
 
 
 def silu(x: Tensor) -> Tensor:

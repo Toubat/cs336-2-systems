@@ -2,7 +2,6 @@ import torch
 from einops import rearrange
 from jaxtyping import Float
 from torch import Tensor, nn
-from torch.profiler import record_function
 
 from cs336_systems.nn.linear import Linear
 from cs336_systems.nn.rope import apply_rope
@@ -30,30 +29,27 @@ class MultiHeadAttention(nn.Module):
         x: Float[Tensor, "bs seq_len d_model"],
         rope_config: RoPEConfig | None = None,
     ) -> Float[Tensor, "bs seq_len d_model"]:
-        with record_function("attn/qkv_proj"):
-            qkv = self.qkv_proj(x)  # (bs seq_len d_model * 3)
-            q, k, v = rearrange(
-                qkv,
-                "bs seq_len (three num_heads d_k) -> three bs num_heads seq_len d_k",
-                num_heads=self.num_heads,
-                d_k=self.d_k,
-            )  # (bs, num_heads, seq_len, d_k)
+        qkv = self.qkv_proj(x)  # (bs seq_len d_model * 3)
+        q, k, v = rearrange(
+            qkv,
+            "bs seq_len (three num_heads d_k) -> three bs num_heads seq_len d_k",
+            num_heads=self.num_heads,
+            d_k=self.d_k,
+        )  # (bs, num_heads, seq_len, d_k)
 
         if rope_config is not None:
-            with record_function("attn/rope"):
-                theta = rope_config.theta
-                d_k = rope_config.d_k
-                max_seq_len = rope_config.max_seq_len
-                token_positions = rope_config.token_positions
-                q = apply_rope(d_k, theta, max_seq_len, q, token_positions, device=x.device)
-                k = apply_rope(d_k, theta, max_seq_len, k, token_positions, device=x.device)
+            theta = rope_config.theta
+            d_k = rope_config.d_k
+            max_seq_len = rope_config.max_seq_len
+            token_positions = rope_config.token_positions
+            q = apply_rope(d_k, theta, max_seq_len, q, token_positions, device=x.device)
+            k = apply_rope(d_k, theta, max_seq_len, k, token_positions, device=x.device)
 
         seq_len = q.shape[-2]
         mask = torch.tril(torch.ones((seq_len, seq_len))).bool().to(x.device)  # (seq_len, seq_len)
 
-        with record_function("attn/sdpa"):
-            o = scaled_dot_product_attention(q, k, v, mask)  # (bs, num_heads, seq_len, d_k)
-            o = rearrange(o, "bs num_heads seq_len d_k -> bs seq_len (num_heads d_k)")
+        # No wrapper here - sdpa/* record_functions are inside scaled_dot_product_attention
+        o = scaled_dot_product_attention(q, k, v, mask)  # (bs, num_heads, seq_len, d_k)
+        o = rearrange(o, "bs num_heads seq_len d_k -> bs seq_len (num_heads d_k)")
 
-        with record_function("attn/o_proj"):
-            return self.o_proj(o)
+        return self.o_proj(o)

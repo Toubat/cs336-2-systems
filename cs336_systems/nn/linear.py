@@ -1,10 +1,9 @@
 import math
 
 import torch
-from einops import einsum
+import torch.nn.functional as F
 from jaxtyping import Float
 from torch import Tensor, nn
-from torch.profiler import record_function
 
 
 class Linear(nn.Module):
@@ -24,5 +23,5 @@ class Linear(nn.Module):
         self.weight = nn.Parameter(weight)
 
     def forward(self, x: Float[Tensor, " ... in_features"]) -> Float[Tensor, " ... out_features"]:
-        with record_function("linear"):
-            return einsum(x, self.weight, " ... in_features, out_features in_features -> ... out_features")
+        # Use F.linear which uses optimized cuBLAS/CUTLASS kernels
+        return F.linear(x, self.weight)

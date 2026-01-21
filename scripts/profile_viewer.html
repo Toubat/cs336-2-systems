@@ -98,18 +98,18 @@
             <!-- Stats Row -->
             <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
                 <div class="bg-wb-card border border-wb-border rounded-lg p-3">
-                    <div class="text-xs text-wb-muted mb-1">Forward CUDA</div>
-                    <div class="text-xl font-semibold text-white stat-value" x-text="formatTime(model?.forward?.total_cuda_time_ms)"></div>
+                    <div class="text-xs text-wb-muted mb-1">Forward CUDA <span class="text-wb-accent">(per step)</span></div>
+                    <div class="text-xl font-semibold text-white stat-value" x-text="formatTime(fwdPerStep)"></div>
                     <div class="text-xs text-wb-muted mt-0.5"><span x-text="model?.forward?.num_events || 0"></span> events</div>
                 </div>
                 <div class="bg-wb-card border border-wb-border rounded-lg p-3">
-                    <div class="text-xs text-wb-muted mb-1">Fwd+Bwd CUDA</div>
-                    <div class="text-xl font-semibold text-white stat-value" x-text="formatTime(model?.backward?.total_cuda_time_ms)"></div>
+                    <div class="text-xs text-wb-muted mb-1">Fwd+Bwd CUDA <span class="text-wb-accent">(per step)</span></div>
+                    <div class="text-xl font-semibold text-white stat-value" x-text="formatTime(fwdBwdPerStep)"></div>
                     <div class="text-xs text-wb-muted mt-0.5"><span x-text="model?.backward?.num_events || 0"></span> events</div>
                 </div>
                 <div class="bg-wb-card border border-wb-border rounded-lg p-3">
-                    <div class="text-xs text-wb-muted mb-1">Bwd Only CUDA</div>
-                    <div class="text-xl font-semibold text-white stat-value" x-text="formatTime(bwdOnlyTime)"></div>
+                    <div class="text-xs text-wb-muted mb-1">Bwd Only CUDA <span class="text-wb-accent">(per step)</span></div>
+                    <div class="text-xl font-semibold text-white stat-value" x-text="formatTime(bwdOnlyPerStep)"></div>
                     <div class="text-xs text-wb-muted mt-0.5">fwd+bwd − fwd</div>
                 </div>
                 <div class="bg-wb-card border border-wb-border rounded-lg p-3">
@@ -269,15 +269,29 @@
                     ].filter(x => x.value != null);
                 },
 
-                get bwdOnlyTime() {
-                    const fwd = this.model?.forward?.total_cuda_time_ms;
-                    const fwdBwd = this.model?.backward?.total_cuda_time_ms;
+                get numSteps() {
+                    return this.model?.num_steps || 1;
+                },
+
+                get fwdPerStep() {
+                    const total = this.model?.forward?.total_cuda_time_ms;
+                    return total ? total / this.numSteps : null;
+                },
+
+                get fwdBwdPerStep() {
+                    const total = this.model?.backward?.total_cuda_time_ms;
+                    return total ? total / this.numSteps : null;
+                },
+
+                get bwdOnlyPerStep() {
+                    const fwd = this.fwdPerStep;
+                    const fwdBwd = this.fwdBwdPerStep;
                     return (fwd && fwdBwd) ? fwdBwd - fwd : null;
                 },
 
                 get bwdFwdRatio() {
-                    const fwd = this.model?.forward?.total_cuda_time_ms;
-                    const bwdOnly = this.bwdOnlyTime;
+                    const fwd = this.fwdPerStep;
+                    const bwdOnly = this.bwdOnlyPerStep;
                     return (fwd && bwdOnly) ? (bwdOnly / fwd).toFixed(2) + 'x' : '--';
                 },
 
@@ -285,16 +299,18 @@
                     if (!this.model) return '';
                     const m = this.model, fwd = m.forward, fwdBwd = m.backward;
                     const cats = this.categorize(fwd?.top_events || []);
-                    let t = `Profile Summary\n${'='.repeat(50)}\n`;
+                    let t = `Profile Summary (per step)\n${'='.repeat(50)}\n`;
                     t += `Model: ${m.size || 'unknown'} | Params: ${this.formatParams(m.num_params)} | Context: ${m.context_length}\n`;
-                    t += `Layers: ${m.num_layers} | Heads: ${m.num_heads} | Batch: ${m.batch_size}\n\n`;
-                    t += `Forward Only CUDA: ${this.formatTime(fwd?.total_cuda_time_ms)}\n`;
-                    t += `Fwd+Bwd CUDA: ${this.formatTime(fwdBwd?.total_cuda_time_ms)}\n`;
-                    t += `Bwd Only CUDA: ${this.formatTime(this.bwdOnlyTime)}\n`;
+                    t += `Layers: ${m.num_layers} | Heads: ${m.num_heads} | Batch: ${m.batch_size} | Steps: ${m.num_steps}\n\n`;
+                    t += `Forward Only CUDA: ${this.formatTime(this.fwdPerStep)}\n`;
+                    t += `Fwd+Bwd CUDA: ${this.formatTime(this.fwdBwdPerStep)}\n`;
+                    t += `Bwd Only CUDA: ${this.formatTime(this.bwdOnlyPerStep)}\n`;
                     t += `Bwd/Fwd Ratio: ${this.bwdFwdRatio}\n\n`;
-                    t += `Forward Breakdown:\n`;
+                    t += `Forward Breakdown (per step):\n`;
+                    const perStepDivisor = this.numSteps;
                     Object.entries(cats).sort((a,b) => b[1]-a[1]).forEach(([k,v]) => {
-                        t += `  ${k}: ${v.toFixed(2)}ms (${(v/fwd.total_cuda_time_ms*100).toFixed(1)}%)\n`;
+                        const perStep = v / perStepDivisor;
+                        t += `  ${k}: ${perStep.toFixed(2)}ms (${(v/fwd.total_cuda_time_ms*100).toFixed(1)}%)\n`;
                     });
                     return t;
                 },
