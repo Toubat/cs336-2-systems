@@ -20,6 +20,7 @@ def benchmark_model(
     num_steps: int,
     batch_size: int,
     use_amp: bool = False,
+    use_compile: bool = False,
 ):
     device = "cuda:0"
     config = ModelConfig()
@@ -29,10 +30,11 @@ def benchmark_model(
         nvtx = None
 
     precision_str = "BF16" if use_amp else "FP32"
+    compile_str = "compiled" if use_compile else "eager"
     amp_context = torch.autocast(device_type="cuda", dtype=torch.bfloat16) if use_amp else nullcontext()
 
     print(f"\n{'=' * 60}")
-    print(f"Benchmarking {size} model: d_model={d_model}, d_ff={d_ff}, num_layers={num_layers}, num_heads={num_heads}")
+    print(f"Benchmarking {size} model ({compile_str}): d_model={d_model}, d_ff={d_ff}, num_layers={num_layers}, num_heads={num_heads}")
     print(f"Precision: {precision_str}")
     print(f"{'=' * 60}")
 
@@ -46,9 +48,14 @@ def benchmark_model(
         theta=config.theta,
     ).to(device)
 
-    # Count parameters
+    # Count parameters before compiling
     num_params = sum(p.numel() for p in model.parameters())
     print(f"Model parameters: {num_params:,} ({num_params / 1e9:.2f}B)")
+
+    # Apply torch.compile if requested
+    if use_compile:
+        print("Compiling model with torch.compile...")
+        model = torch.compile(model)  # type: ignore[assignment]
 
     x = get_random_batch(
         vocab_size=config.vocab_size,
@@ -65,7 +72,7 @@ def benchmark_model(
         with amp_context:
             logits = model(x)
             logits.mean().backward()
-        model.zero_grad()
+        model.zero_grad()  # type: ignore[union-attr]
     if nvtx is not None:
         nvtx.range_pop()
     torch.cuda.synchronize()
@@ -98,7 +105,7 @@ def benchmark_model(
             logits.mean().backward()
         torch.cuda.synchronize()
         backward_times.append((time.perf_counter() - start) * 1000)  # ms
-        model.zero_grad()
+        model.zero_grad()  # type: ignore[union-attr]
     if nvtx is not None:
         nvtx.range_pop()
 
@@ -110,7 +117,9 @@ def benchmark_model(
         "num_params": num_params,
         "batch_size": batch_size,
         "use_amp": use_amp,
+        "use_compile": use_compile,
         "precision": precision_str,
+        "mode": compile_str,
         "forward_mean": float(forward_times_arr.mean()),
         "forward_std": float(forward_times_arr.std()),
         "backward_mean": float(backward_times_arr.mean()),
@@ -131,6 +140,7 @@ class BenchmarkConfig:
     num_steps: int = 20
     batch_size: int = 4
     use_amp: bool = False  # Enable BF16 mixed precision
+    use_compile: bool = False  # Use torch.compile for JIT compilation
 
 
 def main(config: BenchmarkConfig):
@@ -144,6 +154,7 @@ def main(config: BenchmarkConfig):
         num_steps=config.num_steps,
         batch_size=config.batch_size,
         use_amp=config.use_amp,
+        use_compile=config.use_compile,
     )
     print(results)
 

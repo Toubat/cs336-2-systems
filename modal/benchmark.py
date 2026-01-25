@@ -38,6 +38,7 @@ def benchmark_model(
     num_steps: int,
     batch_size: int,
     use_amp: bool = False,
+    use_compile: bool = False,
 ) -> dict:
     import subprocess
 
@@ -54,6 +55,7 @@ def benchmark_model(
             f"num_steps={num_steps}",
             f"batch_size={batch_size}",
             f"use_amp={use_amp}",
+            f"use_compile={use_compile}",
         ],
         capture_output=True,
         text=True,
@@ -78,21 +80,21 @@ async def main(
     num_steps: int = 10,
     batch_size: int = 4,
     use_amp: bool = False,
+    use_compile: bool = False,
     compare_precision: bool = False,  # Run both FP32 and BF16 for comparison
+    compare_compile: bool = False,  # Run both eager and compiled for comparison
 ):
     import asyncio
 
-    if compare_precision:
-        print(
-            f"Running benchmarks (FP32 vs BF16) with warmup_steps={warmup_steps}, num_steps={num_steps}, batch_size={batch_size}"
-        )
-        amp_modes = [False, True]
-    else:
-        precision_str = "BF16" if use_amp else "FP32"
-        print(
-            f"Running benchmarks ({precision_str}) with warmup_steps={warmup_steps}, num_steps={num_steps}, batch_size={batch_size}"
-        )
-        amp_modes = [use_amp]
+    # Determine modes to run
+    amp_modes = [False, True] if compare_precision else [use_amp]
+    compile_modes = [False, True] if compare_compile else [use_compile]
+
+    precision_str = "FP32 vs BF16" if compare_precision else ("BF16" if use_amp else "FP32")
+    compile_str = "eager vs compiled" if compare_compile else ("compiled" if use_compile else "eager")
+
+    print(f"Running benchmarks ({precision_str}, {compile_str})")
+    print(f"warmup_steps={warmup_steps}, num_steps={num_steps}, batch_size={batch_size}")
     print()
 
     all_results = await asyncio.gather(
@@ -107,32 +109,68 @@ async def main(
                 num_steps=num_steps,
                 batch_size=batch_size,
                 use_amp=amp,
+                use_compile=compile,
             )
             for size, config in MODEL_CONFIGS.items()
             for amp in amp_modes
+            for compile in compile_modes
         ]
     )
 
-    # Print summary table
-    print("\n" + "=" * 110)
-    print("SUMMARY")
-    print("=" * 110)
-    print(f"{'Size':<10} {'Precision':<10} {'Params':<12} {'Forward (ms)':<22} {'Backward (ms)':<22}")
-    print("-" * 110)
-
-    # Sort by model size order, then by precision
+    # Sort by model size order, then by precision, then by compile mode
     size_order = ["small", "medium", "large", "xl", "2.7B"]
     sorted_results = sorted(
         all_results,
-        key=lambda x: (size_order.index(x["size"]) if x["size"] in size_order else 999, x.get("use_amp", False)),
+        key=lambda x: (
+            size_order.index(x["size"]) if x["size"] in size_order else 999,
+            x.get("use_amp", False),
+            x.get("use_compile", False),
+        ),
     )
 
-    for r in sorted_results:
-        precision = r.get("precision", "BF16" if r.get("use_amp") else "FP32")
-        params = f"{r.get('num_params', 0) / 1e9:.2f}B"
-        forward = f"{r.get('forward_mean', 0):.2f} ± {r.get('forward_std', 0):.2f}"
-        backward = f"{r.get('backward_mean', 0):.2f} ± {r.get('backward_std', 0):.2f}"
-        print(f"{r['size']:<10} {precision:<10} {params:<12} {forward:<22} {backward:<22}")
+    # Print summary tables grouped by compile mode
+    for mode_name, mode_filter in [("EAGER", False), ("COMPILED", True)]:
+        mode_results = [r for r in sorted_results if r.get("use_compile", False) == mode_filter]
+        if not mode_results:
+            continue
+
+        print("\n" + "=" * 120)
+        print(f"SUMMARY - {mode_name}")
+        print("=" * 120)
+        print(f"{'Size':<10} {'Precision':<10} {'Params':<12} {'Forward (ms)':<22} {'Backward (ms)':<22}")
+        print("-" * 120)
+
+        for r in mode_results:
+            precision = r.get("precision", "BF16" if r.get("use_amp") else "FP32")
+            params = f"{r.get('num_params', 0) / 1e9:.2f}B"
+            forward = f"{r.get('forward_mean', 0):.2f} ± {r.get('forward_std', 0):.2f}"
+            backward = f"{r.get('backward_mean', 0):.2f} ± {r.get('backward_std', 0):.2f}"
+            print(f"{r['size']:<10} {precision:<10} {params:<12} {forward:<22} {backward:<22}")
+
+    # Print speedup comparison if both modes were run
+    if compare_compile:
+        print("\n" + "=" * 120)
+        print("SPEEDUP (eager / compiled) - higher means compiled is faster")
+        print("=" * 120)
+        print(f"{'Size':<10} {'Precision':<10} {'Forward Speedup':<20} {'Backward Speedup':<20}")
+        print("-" * 120)
+
+        # Build lookup for eager results
+        eager_lookup = {}
+        for r in sorted_results:
+            if not r.get("use_compile", False):
+                key = (r["size"], r.get("use_amp", False))
+                eager_lookup[key] = r
+
+        for r in sorted_results:
+            if r.get("use_compile", False):
+                key = (r["size"], r.get("use_amp", False))
+                eager = eager_lookup.get(key)
+                if eager:
+                    fwd_speedup = eager.get("forward_mean", 0) / r.get("forward_mean", 1)
+                    bwd_speedup = eager.get("backward_mean", 0) / r.get("backward_mean", 1)
+                    precision = r.get("precision", "FP32")
+                    print(f"{r['size']:<10} {precision:<10} {fwd_speedup:.2f}x{'':<15} {bwd_speedup:.2f}x")
 
 
 """
